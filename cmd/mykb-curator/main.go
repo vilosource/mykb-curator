@@ -34,6 +34,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/orchestrator"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends/markdown"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/editorial"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/projection"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes"
@@ -112,8 +113,16 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 		return err
 	}
 
+	llmClient, llmErr := composeLLMClient(cfg)
+	if llmErr != nil {
+		return llmErr
+	}
+
 	frontendRegistry := frontends.NewRegistry()
 	frontendRegistry.Register(projection.New())
+	if llmClient != nil {
+		frontendRegistry.Register(editorial.New(llmClient, cfg.LLM.Model))
+	}
 
 	// Pass pipeline is per-run because ResolveKBRefs closes over the
 	// kb snapshot. ValidateLinks's known-pages map is built from the
@@ -130,12 +139,17 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 		defer cacheCloser()
 	}
 
+	orchLLM := llm.Client(stubLLM{})
+	if llmClient != nil {
+		orchLLM = llmClient
+	}
+
 	orch := orchestrator.New(orchestrator.Deps{
 		Wiki:        cfg.Wiki,
 		KB:          kbSrc,
 		Specs:       specStore,
 		WikiTarget:  wikiTarget,
-		LLM:         stubLLM{},
+		LLM:         orchLLM,
 		Frontends:   frontendRegistry,
 		BuildPasses: buildPasses,
 		Backend:     markdown.New(),
@@ -255,6 +269,51 @@ func buildKnownPages(store specs.Store) map[string]bool {
 		}
 	}
 	return out
+}
+
+// composeLLMClient builds the LLM client per cfg.LLM.Provider:
+//
+//	anthropic → AnthropicClient (env-supplied key), wrapped in cache
+//	replay    → ReplayClient against a fixtures dir
+//	none/""   → nil (LLM-using frontends will not be registered)
+//
+// When a real client is built it's wrapped in CacheDecorator so
+// repeated runs reuse responses — same files committed test fixtures
+// use, so production cache can be promoted into the fixture set.
+func composeLLMClient(cfg *config.Config) (llm.Client, error) {
+	switch cfg.LLM.Provider {
+	case "", "none":
+		return nil, nil
+	case "anthropic":
+		key := os.Getenv(cfg.LLM.APIKeyEnv)
+		if key == "" {
+			return nil, fmt.Errorf("llm.api_key_env=%q: env var unset", cfg.LLM.APIKeyEnv)
+		}
+		inner := llm.NewAnthropicClient(llm.AnthropicConfig{
+			Endpoint: cfg.LLM.Endpoint,
+			APIKey:   key,
+		})
+		cacheDir := filepath.Join(llmCacheDir(cfg), "anthropic")
+		return llm.NewCacheDecorator(inner, cacheDir), nil
+	case "replay":
+		// Replay points at a directory of pre-recorded responses —
+		// used for tests and deterministic CI runs.
+		dir := cfg.LLM.Endpoint
+		if dir == "" {
+			dir = filepath.Join(llmCacheDir(cfg), "anthropic")
+		}
+		return llm.NewReplayClient(dir), nil
+	default:
+		return nil, fmt.Errorf("llm.provider=%q: unknown (known: anthropic, replay, none)", cfg.LLM.Provider)
+	}
+}
+
+func llmCacheDir(cfg *config.Config) string {
+	base := cfg.CacheDir
+	if base == "" {
+		base = filepath.Join(os.Getenv("HOME"), ".cache", "mykb-curator", cfg.Wiki)
+	}
+	return filepath.Join(base, "llm")
 }
 
 // composeRunStateCache opens the per-wiki bbolt cache. Returns a
