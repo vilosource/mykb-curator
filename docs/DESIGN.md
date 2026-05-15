@@ -941,52 +941,67 @@ Tech choices:
 
 ## 17. Roadmap
 
-**v0.1 — Walking Skeleton (2 weeks)**
+The numbered milestones below were the original sequencing plan; status is updated as work lands.
+
+### Done (as of 2026-05-15)
+
+**v0.1 — Walking Skeleton** ✓
 
 - CLI scaffold + per-wiki config loader
-- `KBSourceAdapter`: git only
-- `SpecStoreAdapter`: git + local-fs
-- `WikiTargetAdapter`: MediaWiki only (`mwn`)
-- `ProjectionFrontend` only (deterministic)
-- IR + 3 essential passes (`ResolveKBRefs`, `ValidateLinks`, `ApplyZoneMarkers`)
-- `MarkdownBackend` + `MediaWikiBackend`
-- Reconciler with machine-owned blocks (editorial regions out)
-- Run report (file only)
-- One real spec: a projection of one mykb area onto a test wiki
+- `KBSourceAdapter`: local + git (go-git, clone-and-pull, diff)
+- `SpecStoreAdapter`: localfs
+- `WikiTargetAdapter`: MediaWiki (go-mwclient) + in-memory
+- `ProjectionFrontend` (deterministic)
+- IR + the three essential passes: `ResolveKBRefs`, `ApplyZoneMarkers`, `ValidateLinks`
+- `MarkdownBackend` + `MediaWiki` (via wiki target adapter)
+- Reconciler with machine-owned blocks (create / upsert / no-op decisions, human-edit detection)
+- Run report (in-memory + on-disk YAML with `latest.yaml` symlink)
+- `--out` flag for offline markdown preview
+- One real spec: a projection of one fixture area onto a real MediaWiki
 
-Exit: a curator run renders one area to one MediaWiki page; second run no-ops; manual wiki edit is detected and surfaced in report.
+**v0.5 — Editorial mode + maintenance** ✓
 
-**v0.5 — Editorial mode + maintenance (3 weeks)**
+- `EditorialFrontend` (LLM-driven, markdown-output parser)
+- LLM client: `AnthropicClient` (hand-rolled minimal HTTPS) + `CacheDecorator` (filesystem cache) + `ReplayClient` (committed fixtures)
+- `KB Maintenance Pipeline`: `StalenessCheck` + `LinkRotCheck`
+- `PR Backend` against kb git (branches off configured base, writes a per-run proposal summary, commits — caller pushes + opens PR)
+- Diff-driven runs: `kb.Source.DiffSince(prevCommit) → []changedAreas`; orchestrator skips specs whose `include:` doesn't intersect the diff
+- Run-state cache: `bbolt` per-wiki file persisting `(specID → LastBotRevID, LastKBCommit)` so reconciler exits first-render mode after run 1
+- First L4 scenario test: real MediaWiki container via testcontainers-go, full pipeline writes a fixture spec to the wiki, content verified via API
 
-- `EditorialFrontend` (LLM-driven)
-- LLM client with caching
-- Editorial regions in reconciler (block provenance)
-- `KB Maintenance Pipeline`: staleness + link-rot checks
-- `PR Backend` against kb git
-- Diff-driven runs
-- Cache with `(spec_hash, kb_subset_hash)`
+**Engineering** ✓
 
-Exit: a real `Azure_Infrastructure` editorial page is curator-maintained on a target wiki; weekly cron runs without churn; maintenance PRs open against the kb repo when something genuinely needs updating.
+- All four pyramid levels exercised (unit / integration / contract / scenario)
+- Contract suites for `Backend`, `Frontend`, `wiki.Target`, `kb.Source`
+- GitHub Actions CI green on every PR (Go 1.25, golangci-lint v2)
+- TDD red/green discipline followed for every behaviour-bearing component
 
-**v1.0 — Production (4 weeks)**
+### Not yet
 
-- Diagram rendering pass (mermaid → png upload)
-- Style rules pass
-- External truth check (opt-in per spec)
-- Optional sinks: Slack/email reports
-- Lock + atomicity hardening
-- Documentation + spec authoring guide
+**v0.6 — Editorial reconcile + spec-hash cache**
 
-Exit: two distinct wikis maintained by the curator on a schedule; both fully reviewed via run reports + PRs.
+- Editorial regions in reconciler (block provenance, preserve human polish when inputs unchanged)
+- Cache rendered IR by `(spec_hash, kb_subset_hash, pipeline_version)` so unchanged-input specs skip the LLM frontend entirely
+- Recording LLM client (replay-cache populator that wraps a real provider)
+
+**v1.0 — Production hardening**
+
+- Diagram rendering pass (mermaid → png upload via wiki adapter's `UploadFile`)
+- Style rules pass (configurable terminology / heading hierarchy / link format)
+- External truth check (opt-in web search per spec/area)
+- Optional run-report sinks: Slack webhook, email, kb workspace journal entry
+- Per-wiki lock + atomicity hardening (currently nothing prevents two concurrent runs against the same wiki)
+- Spec authoring guide + CONTRIBUTING.md
 
 **v2+ — Extensibility**
 
 - Confluence backend
-- Static-HTML backend (Hugo / public docs)
-- 3-way merge in reconciler
-- v2-daemon kb-source (live kb access)
-- Pre-filtered kb adapter (tag-based)
+- Static-HTML backend (Hugo / public docs / GitBook export)
+- 3-way merge in reconciler (preserve human edits inside machine-owned blocks where they don't conflict with regeneration)
+- mykb v2-daemon kb-source (live kb access via the privileged-write-channel)
+- Pre-filtered kb adapter (tag-based defense-in-depth for shared brains)
 - Spec authoring via `mykb-curator spec init` LLM conversation
+- `PandocBackend` (IR → Pandoc JSON → docx / PDF / EPUB / RTF)
 
 ---
 
