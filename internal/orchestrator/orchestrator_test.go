@@ -222,7 +222,7 @@ func TestRun_RunStateCache_RoundTripsBotRevAcrossRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runstate.Open: %v", err)
 	}
-	defer rs.Close()
+	defer func() { _ = rs.Close() }()
 
 	reg := frontends.NewRegistry()
 	reg.Register(fakeFrontend{})

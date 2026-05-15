@@ -12,7 +12,7 @@ func TestOpen_CreatesFileIfMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	if c == nil {
 		t.Errorf("Open returned nil cache")
@@ -21,7 +21,7 @@ func TestOpen_CreatesFileIfMissing(t *testing.T) {
 
 func TestGet_MissingSpec_ReturnsZeroAndOK(t *testing.T) {
 	c := openTmp(t)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	got, ok, err := c.Get("does-not-exist.spec.md")
 	if err != nil {
@@ -37,7 +37,7 @@ func TestGet_MissingSpec_ReturnsZeroAndOK(t *testing.T) {
 
 func TestSetGet_RoundTrip(t *testing.T) {
 	c := openTmp(t)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	want := SpecState{
 		LastBotRevID:   "rev-49231",
@@ -69,7 +69,7 @@ func TestSetGet_RoundTrip(t *testing.T) {
 
 func TestSet_Overwrites(t *testing.T) {
 	c := openTmp(t)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	_ = c.Set("k", SpecState{LastBotRevID: "first"})
 	_ = c.Set("k", SpecState{LastBotRevID: "second"})
@@ -92,7 +92,7 @@ func TestPersistence_ReopenSeesPriorState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer c2.Close()
+	defer func() { _ = c2.Close() }()
 
 	got, ok, _ := c2.Get("k")
 	if !ok || got.LastBotRevID != "persisted" {
