@@ -275,22 +275,3 @@ func decodeRevision(rev any) wiki.Revision {
 	}
 }
 
-// decodeContent pulls the rendered text from a revision. MW 1.32+
-// returns content via slots; older API responses use a direct "*"
-// field. We handle both.
-func decodeContent(rev any) string {
-	type stringer interface {
-		GetString(...string) (string, error)
-	}
-	r, ok := rev.(stringer)
-	if !ok {
-		return ""
-	}
-	if c, err := r.GetString("slots", "main", "*"); err == nil {
-		return c
-	}
-	if c, err := r.GetString("*"); err == nil {
-		return c
-	}
-	return ""
-}
