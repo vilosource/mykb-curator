@@ -37,6 +37,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes/zonemarkers"
+	"github.com/vilosource/mykb-curator/internal/reporter"
 )
 
 var (
@@ -61,7 +62,7 @@ func newRootCmd() *cobra.Command {
 }
 
 func newRunCmd() *cobra.Command {
-	var wiki, configPath, outDir string
+	var wiki, configPath, outDir, reportDir string
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Execute one curator pass",
@@ -77,12 +78,13 @@ func newRunCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runFromConfig(cmd.Context(), cfg, outDir)
+			return runFromConfig(cmd.Context(), cfg, outDir, reportDir)
 		},
 	}
 	cmd.Flags().StringVar(&wiki, "wiki", "", "wiki tenant name (matches the config filename)")
 	cmd.Flags().StringVar(&configPath, "config", "", "config file path (defaults to ~/.config/mykb-curator/<wiki>.yaml)")
-	cmd.Flags().StringVar(&outDir, "out", "", "if set, write rendered markdown for each spec to <out>/<spec-id>.md (no wiki push yet)")
+	cmd.Flags().StringVar(&outDir, "out", "", "if set, write rendered markdown for each spec to <out>/<spec-id>.md")
+	cmd.Flags().StringVar(&reportDir, "report-dir", "", "if set, write per-run report YAML to <report-dir>/<run-id>.yaml and update latest.yaml symlink")
 	return cmd
 }
 
@@ -93,7 +95,7 @@ func newRunCmd() *cobra.Command {
 // LLM client are still stubbed — concrete impls land per roadmap.
 // Any spec-store type other than "local" returns a clear error so
 // the user knows what's implemented vs not.
-func runFromConfig(ctx context.Context, cfg *config.Config, outDir string) error {
+func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir string) error {
 	specStore, err := composeSpecStore(cfg)
 	if err != nil {
 		return err
@@ -130,13 +132,30 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir string) error
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run failed:", err)
 		fmt.Fprintln(os.Stderr, report.Summary())
+		persistReport(report, reportDir)
 		return err
 	}
 	fmt.Println(report.Summary())
 	for _, s := range report.Specs {
 		fmt.Printf("  spec=%s status=%s blocks=%d %s\n", s.ID, s.Status, s.BlocksRegenerated, s.Reason)
 	}
+	persistReport(report, reportDir)
 	return nil
+}
+
+// persistReport writes the run report to disk if reportDir is set.
+// Failures here are warnings — the run itself already happened and
+// the report is on the screen.
+func persistReport(report reporter.Report, reportDir string) {
+	if reportDir == "" {
+		return
+	}
+	path, err := report.WriteToDir(reportDir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "warning: could not persist run report:", err)
+		return
+	}
+	fmt.Println("run report:", path)
 }
 
 // composeOnRenderedSink builds the OnRendered callback based on

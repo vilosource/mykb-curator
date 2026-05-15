@@ -133,10 +133,10 @@ func (t *Target) HumanEditsSinceBot(_ context.Context, title, lastBotRevID strin
 	return nil, nil
 }
 
-// simulateHumanEdit inserts a non-bot revision. Test helper — not
+// SimulateHumanEdit inserts a non-bot revision. Test helper — not
 // part of the Target interface; used by the unit tests to set up
 // human-edit reconciliation scenarios.
-func (t *Target) simulateHumanEdit(title, user, content, summary string) {
+func (t *Target) SimulateHumanEdit(title, user, content, summary string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 

@@ -18,6 +18,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/reconciler"
 	"github.com/vilosource/mykb-curator/internal/reporter"
 )
 
@@ -144,17 +145,92 @@ func (o *Orchestrator) processSpec(ctx context.Context, s specs.Spec, snap kb.Sn
 		}
 	}
 
+	result := reporter.SpecResult{
+		ID:                s.ID,
+		Status:            reporter.StatusRendered,
+		BlocksRegenerated: countBlocks(doc),
+	}
+
+	// Reconcile + push to the wiki when a real WikiTarget is wired.
+	// The reconciler reads the current wiki state, detects human
+	// edits since our last write, and tells us whether to upsert or
+	// no-op. Acting on the Decision is the orchestrator's job.
+	if rendered != nil && o.deps.WikiTarget != nil && s.Page != "" {
+		pushResult, err := o.reconcileAndPush(ctx, s, rendered)
+		if err != nil {
+			return reporter.SpecResult{ID: s.ID, Status: reporter.StatusFailed, Reason: err.Error()}
+		}
+		result.HumanEdits = pushResult.HumanEdits
+		result.NewRevisionID = pushResult.NewRevisionID
+		if pushResult.NoOp {
+			result.Status = reporter.StatusSkipped
+			result.Reason = "no content change since last bot revision"
+		}
+	}
+
 	if o.deps.OnRendered != nil && rendered != nil {
 		if err := o.deps.OnRendered(s.ID, rendered, doc); err != nil {
 			return reporter.SpecResult{ID: s.ID, Status: reporter.StatusFailed, Reason: err.Error()}
 		}
 	}
 
-	return reporter.SpecResult{
-		ID:                s.ID,
-		Status:            reporter.StatusRendered,
-		BlocksRegenerated: countBlocks(doc),
+	return result
+}
+
+type pushResult struct {
+	NoOp          bool
+	NewRevisionID string
+	HumanEdits    []reporter.HumanEditEvent
+}
+
+// reconcileAndPush runs the reconciler against the current wiki
+// state and acts on the Decision. lastBotRevID is "" today (no
+// cache yet) — first-render mode every time. When the run-state
+// cache lands (v0.0.5), this becomes a lookup.
+func (o *Orchestrator) reconcileAndPush(ctx context.Context, s specs.Spec, rendered []byte) (pushResult, error) {
+	rec := reconciler.New(o.deps.WikiTarget)
+	dec, err := rec.Reconcile(ctx, s.Page, rendered, "" /* lastBotRevID */)
+	if err != nil {
+		return pushResult{}, err
 	}
+
+	res := pushResult{
+		HumanEdits: convertHumanEdits(dec.HumanEdits),
+	}
+
+	switch dec.Action {
+	case reconciler.ActionNoOp:
+		res.NoOp = true
+		return res, nil
+	case reconciler.ActionCreate, reconciler.ActionUpsert:
+		summary := fmt.Sprintf("mykb-curator: spec=%s", s.ID)
+		rev, err := o.deps.WikiTarget.UpsertPage(ctx, s.Page, string(rendered), summary)
+		if err != nil {
+			return pushResult{}, fmt.Errorf("upsert %q: %w", s.Page, err)
+		}
+		res.NewRevisionID = rev.ID
+		return res, nil
+	default:
+		return pushResult{}, fmt.Errorf("unknown reconciler action %q", dec.Action)
+	}
+}
+
+// convertHumanEdits maps reconciler types to reporter types. Two
+// types because reporter must not depend on reconciler.
+func convertHumanEdits(in []reconciler.HumanEditDetection) []reporter.HumanEditEvent {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]reporter.HumanEditEvent, len(in))
+	for i, e := range in {
+		out[i] = reporter.HumanEditEvent{
+			BlockID:     "page", // page-level for now; block-level in v0.5
+			Action:      reporter.ActionOverwritten,
+			Diff:        e.Diff,
+			Explanation: fmt.Sprintf("human edit by %s after last bot write", e.Revision.User),
+		}
+	}
+	return out
 }
 
 // countBlocks reports the total number of IR blocks across all

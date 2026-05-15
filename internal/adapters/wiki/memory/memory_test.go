@@ -95,7 +95,7 @@ func TestHumanEditsSinceBot_AfterHumanEdit_ReturnsTheEdit(t *testing.T) {
 	tgt := New("User:Bot")
 	r1, _ := tgt.UpsertPage(context.Background(), "P", "v1-bot", "first")
 	// Simulate a human editing the page directly.
-	tgt.simulateHumanEdit("P", "User:Alice", "v1-human", "drive-by fix")
+	tgt.SimulateHumanEdit("P", "User:Alice", "v1-human", "drive-by fix")
 
 	got, err := tgt.HumanEditsSinceBot(context.Background(), "P", r1.ID)
 	if err != nil {
