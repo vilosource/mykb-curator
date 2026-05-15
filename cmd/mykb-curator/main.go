@@ -13,10 +13,13 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -32,6 +35,10 @@ import (
 	"github.com/vilosource/mykb-curator/internal/config"
 	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/orchestrator"
+	"github.com/vilosource/mykb-curator/internal/pipelines/maintenance"
+	"github.com/vilosource/mykb-curator/internal/pipelines/maintenance/checks/linkrot"
+	"github.com/vilosource/mykb-curator/internal/pipelines/maintenance/checks/staleness"
+	"github.com/vilosource/mykb-curator/internal/pipelines/maintenance/prbackend"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends/markdown"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/editorial"
@@ -144,17 +151,21 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 		orchLLM = llmClient
 	}
 
+	maintPipeline, onMaint := composeMaintenance(cfg)
+
 	orch := orchestrator.New(orchestrator.Deps{
-		Wiki:        cfg.Wiki,
-		KB:          kbSrc,
-		Specs:       specStore,
-		WikiTarget:  wikiTarget,
-		LLM:         orchLLM,
-		Frontends:   frontendRegistry,
-		BuildPasses: buildPasses,
-		Backend:     markdown.New(),
-		OnRendered:  onRendered,
-		RunState:    cache,
+		Wiki:          cfg.Wiki,
+		KB:            kbSrc,
+		Specs:         specStore,
+		WikiTarget:    wikiTarget,
+		LLM:           orchLLM,
+		Frontends:     frontendRegistry,
+		BuildPasses:   buildPasses,
+		Backend:       markdown.New(),
+		OnRendered:    onRendered,
+		RunState:      cache,
+		Maintenance:   maintPipeline,
+		OnMaintenance: onMaint,
 	})
 
 	report, err := orch.Run(ctx)
@@ -269,6 +280,69 @@ func buildKnownPages(store specs.Store) map[string]bool {
 		}
 	}
 	return out
+}
+
+// composeMaintenance builds the kb-maintenance pipeline + the
+// proposal handler.
+//
+// v0.5 defaults: staleness (90 days) + link-rot (5s HEAD timeout).
+// Returns (nil, nil) when kb_writeback.type is unset/none — the
+// orchestrator skips the maintenance phase entirely.
+func composeMaintenance(cfg *config.Config) (*maintenance.Pipeline, func([]maintenance.MutationProposal) error) {
+	if cfg.KBWriteback.Type == "" || cfg.KBWriteback.Type == "none" {
+		return nil, nil
+	}
+	pipeline := maintenance.NewPipeline(
+		staleness.New(90*24*time.Hour),
+		linkrot.New(5*time.Second),
+	)
+	// PR backend writes to the kb working tree (the git source's
+	// clone dir). Only meaningful for kb_source.type=git; for local
+	// sources we skip the PR backend and just log the proposal count.
+	if cfg.KBSource.Type != "git" {
+		return pipeline, func(props []maintenance.MutationProposal) error {
+			fmt.Fprintf(os.Stderr, "maintenance: %d proposal(s); PR backend skipped (kb_source.type=%q)\n", len(props), cfg.KBSource.Type)
+			return nil
+		}
+	}
+	workDir := kbWorkDir(cfg)
+	pr := prbackend.New(workDir)
+	baseBranch := cfg.KBWriteback.BaseBranch
+	if baseBranch == "" {
+		baseBranch = "main"
+	}
+	return pipeline, func(props []maintenance.MutationProposal) error {
+		res, err := pr.Submit(context.Background(), prbackend.Input{
+			RunID:      newRunID(),
+			BaseBranch: baseBranch,
+			Proposals:  props,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println("maintenance: opened branch", res.Branch, "with", res.Mutations, "proposal(s)")
+		fmt.Println("maintenance: push manually and open PR via gh:")
+		fmt.Printf("    cd %s && git push -u origin %s\n", workDir, res.Branch)
+		fmt.Printf("    gh pr create --base %s --head %s --title 'curator: maintenance proposals' --body-file curator-proposals/...\n", baseBranch, res.Branch)
+		return nil
+	}
+}
+
+// kbWorkDir computes the on-disk path of the kb clone (mirrors the
+// composeKBSource logic but only returns the path, not the adapter).
+func kbWorkDir(cfg *config.Config) string {
+	if cfg.CacheDir != "" {
+		return filepath.Join(cfg.CacheDir, "kb-clone")
+	}
+	return filepath.Join(os.Getenv("HOME"), ".cache", "mykb-curator", cfg.Wiki, "kb-clone")
+}
+
+// newRunID returns a short hex id, matching the orchestrator's own
+// run-id shape. Duplicated rather than imported to avoid a cycle.
+func newRunID() string {
+	b := make([]byte, 4)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // composeLLMClient builds the LLM client per cfg.LLM.Provider:

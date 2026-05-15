@@ -17,6 +17,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki"
 	"github.com/vilosource/mykb-curator/internal/cache/runstate"
 	"github.com/vilosource/mykb-curator/internal/llm"
+	"github.com/vilosource/mykb-curator/internal/pipelines/maintenance"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
@@ -75,6 +76,18 @@ type Deps struct {
 	// edit detection only catches edits between renders that
 	// happened during the SAME run, which is not useful).
 	RunState *runstate.Cache
+
+	// Maintenance is the kb-maintenance pipeline (staleness, link-rot,
+	// etc.). When set, it runs after the spec loop against the same
+	// kb snapshot. Nil = no maintenance.
+	Maintenance *maintenance.Pipeline
+
+	// OnMaintenance handles the proposals produced by the maintenance
+	// pipeline (typically: open a PR via the PR backend). Called only
+	// when Maintenance is set and produced ≥ 1 proposal. Errors are
+	// recorded on the run report but do not fail the overall run —
+	// the curated pages have already shipped.
+	OnMaintenance func(proposals []maintenance.MutationProposal) error
 }
 
 // Orchestrator drives one curator run end-to-end.
@@ -135,7 +148,30 @@ func (o *Orchestrator) Run(ctx context.Context) (reporter.Report, error) {
 		rb.AddSpecResult(o.processSpec(ctx, s, snap, passPipeline))
 	}
 
+	o.runMaintenance(ctx, snap, rb)
+
 	return rb.Build(), nil
+}
+
+// runMaintenance executes the maintenance pipeline if configured.
+// Errors are recorded on the report but don't fail the run — the
+// page renders have already happened; maintenance is supplementary.
+func (o *Orchestrator) runMaintenance(ctx context.Context, snap kb.Snapshot, rb *reporter.Builder) {
+	if o.deps.Maintenance == nil {
+		return
+	}
+	proposals, err := o.deps.Maintenance.Run(ctx, snap)
+	if err != nil {
+		rb.AddError(fmt.Errorf("maintenance: %w", err))
+		return
+	}
+	rb.AddWarning(fmt.Sprintf("maintenance produced %d proposal(s)", len(proposals)))
+	if len(proposals) == 0 || o.deps.OnMaintenance == nil {
+		return
+	}
+	if err := o.deps.OnMaintenance(proposals); err != nil {
+		rb.AddError(fmt.Errorf("maintenance handler: %w", err))
+	}
 }
 
 // diffDrivenSkip decides whether to skip a spec because nothing it
