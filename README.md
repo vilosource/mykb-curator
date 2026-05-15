@@ -4,7 +4,7 @@ Maintains human-facing wikis as curated, continuously-updated projections of a [
 
 **Status:** v0.0 walking skeleton — design + scaffold landed; rendering pipeline not yet implemented.
 
-**Language:** Go 1.23.
+**Language:** Go 1.25.
 
 ## What it is
 
@@ -29,7 +29,7 @@ make test       # unit tests (the dev inner loop)
 make test-all   # full pyramid (containers required for integration+)
 ```
 
-Requires Go 1.23+. Container-based test levels (integration / scenario) require Docker.
+Requires Go 1.25+. Container-based test levels (integration / scenario) require Docker.
 
 ## License
 
