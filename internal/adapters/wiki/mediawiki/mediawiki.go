@@ -43,6 +43,14 @@ type Config struct {
 	// UserAgent is the HTTP User-Agent header. Defaults to a
 	// curator-identifying string if empty.
 	UserAgent string
+
+	// DisableBotAssert, when true, skips the MediaWiki `assert=bot`
+	// guard the client otherwise applies to every request.
+	// Production deployments leave this false — assertion is a
+	// safety net that catches "your bot lost its group" silently.
+	// Test wikis (and any setup where the bot identity doesn't have
+	// a separate bot group) set it true.
+	DisableBotAssert bool
 }
 
 // Target implements wiki.Target on top of go-mwclient.
@@ -61,18 +69,32 @@ func New(cfg Config) (*Target, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mediawiki: new client: %w", err)
 	}
-	c.Assert = mwclient.AssertBot
+	if !cfg.DisableBotAssert {
+		c.Assert = mwclient.AssertBot
+	}
 	return &Target{cfg: cfg, client: c}, nil
 }
 
 // ensureAuth logs in if we haven't yet. Idempotent: go-mwclient
 // keeps the session cookie alive after the first login.
+//
+// API warnings (e.g., deprecation notices about action=login) are
+// not treated as errors — they're informational and the underlying
+// call succeeds. Real auth failures still propagate.
 func (t *Target) ensureAuth(_ context.Context) error {
 	if t.cfg.BotUser == "" {
 		// Allow unauthenticated read-only use.
 		return nil
 	}
-	return t.client.Login(t.cfg.BotUser, t.cfg.BotPass)
+	err := t.client.Login(t.cfg.BotUser, t.cfg.BotPass)
+	if err == nil {
+		return nil
+	}
+	var warnings mwclient.APIWarnings
+	if errors.As(err, &warnings) {
+		return nil
+	}
+	return err
 }
 
 // Whoami returns the configured bot identity. Cheaper + more
@@ -131,25 +153,30 @@ func (t *Target) GetPage(ctx context.Context, title string) (*wiki.Page, error) 
 
 // UpsertPage creates or updates a page. bot=true is set so the
 // revision shows the bot flag in history.
+//
+// Returns a Revision populated from what we know at edit time —
+// no read-after-write. Immediate readback on MediaWiki can race
+// with SQLite indexing on fresh installs and the precise revision
+// id isn't worth that fragility. Callers needing the new revision
+// id can compose with a follow-up GetPage when stability is critical.
 func (t *Target) UpsertPage(ctx context.Context, title, content, summary string) (wiki.Revision, error) {
 	if err := t.ensureAuth(ctx); err != nil {
 		return wiki.Revision{}, fmt.Errorf("mediawiki: auth: %w", err)
 	}
-	err := t.client.Edit(params.Values{
+	if err := t.client.Edit(params.Values{
 		"title":   title,
 		"text":    content,
 		"summary": summary,
 		"bot":     "1",
-	})
-	if err != nil {
+	}); err != nil {
 		return wiki.Revision{}, fmt.Errorf("mediawiki: edit %q: %w", title, err)
 	}
-	// Read back the latest revision to populate the Revision struct.
-	page, err := t.GetPage(ctx, title)
-	if err != nil || page == nil {
-		return wiki.Revision{}, fmt.Errorf("mediawiki: edit succeeded but get-back failed")
-	}
-	return page.LatestRevision, nil
+	return wiki.Revision{
+		User:      t.cfg.BotUser,
+		Timestamp: time.Now().UTC(),
+		Comment:   summary,
+		IsBot:     true,
+	}, nil
 }
 
 // History fetches revision metadata, newest first. sinceRevID, when

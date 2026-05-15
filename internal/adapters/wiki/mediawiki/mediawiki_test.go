@@ -118,8 +118,18 @@ func TestUpsertPage_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpsertPage: %v", err)
 	}
-	if rev.ID == "" {
-		t.Errorf("revision ID empty")
+	// v0.5: UpsertPage no longer issues an immediate readback, so the
+	// revision ID is not populated. User + IsBot + Comment + summary
+	// metadata are. The contract suite + scenario tests verify the
+	// page actually landed by reading it back separately.
+	if rev.User != "User:Bot" {
+		t.Errorf("rev.User = %q, want %q", rev.User, "User:Bot")
+	}
+	if !rev.IsBot {
+		t.Errorf("rev.IsBot = false, want true")
+	}
+	if rev.Comment != "first edit" {
+		t.Errorf("rev.Comment = %q, want %q", rev.Comment, "first edit")
 	}
 }
 
