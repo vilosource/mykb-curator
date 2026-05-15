@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/vilosource/mykb-curator/internal/adapters/kb"
 	"github.com/vilosource/mykb-curator/internal/adapters/specs"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki"
+	"github.com/vilosource/mykb-curator/internal/adapters/wiki/memory"
+	"github.com/vilosource/mykb-curator/internal/cache/runstate"
 	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
@@ -207,6 +210,64 @@ func TestRun_WiredPipeline_UnknownKind_FailsSpec(t *testing.T) {
 	rep, _ := o.Run(context.Background())
 	if rep.Specs[0].Status != reporter.StatusFailed {
 		t.Errorf("status = %q, want %q (no editorial frontend registered)", rep.Specs[0].Status, reporter.StatusFailed)
+	}
+}
+
+func TestRun_RunStateCache_RoundTripsBotRevAcrossRuns(t *testing.T) {
+	// Two consecutive runs: the second run must see the bot revision
+	// the first one wrote. This proves the reconciler exits
+	// first-render mode once the cache is wired.
+	dir := t.TempDir()
+	rs, err := runstate.Open(filepath.Join(dir, "rs.bolt"))
+	if err != nil {
+		t.Fatalf("runstate.Open: %v", err)
+	}
+	defer rs.Close()
+
+	reg := frontends.NewRegistry()
+	reg.Register(fakeFrontend{})
+
+	// Wiki target must be shared across runs — that's the whole point
+	// of the test (run 2 sees what run 1 wrote).
+	wikiTarget := memory.New("User:Bot")
+
+	build := func() *Orchestrator {
+		return New(Deps{
+			Wiki: "acme",
+			KB:   fakeKB{commit: "abc"},
+			Specs: fakeSpecs{items: []specs.Spec{
+				{ID: "page-a", Wiki: "acme", Page: "PageA", Kind: "projection"},
+			}},
+			WikiTarget: wikiTarget,
+			LLM:        fakeLLM{},
+			Frontends:  reg,
+			Backend:    fakeBackend{},
+			RunState:   rs,
+		})
+	}
+
+	rep1, err := build().Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run 1: %v", err)
+	}
+	if len(rep1.Specs) != 1 || rep1.Specs[0].NewRevisionID == "" {
+		t.Fatalf("expected first run to record a new revision; got %+v", rep1.Specs)
+	}
+	firstRev := rep1.Specs[0].NewRevisionID
+
+	// Verify the cache learned the revision.
+	st, ok, _ := rs.Get("page-a")
+	if !ok || st.LastBotRevID != firstRev {
+		t.Errorf("cache state after run 1 = (%+v, %v), want LastBotRevID=%q", st, ok, firstRev)
+	}
+
+	// Second run: same fake frontend produces same content as before
+	// in this test, but the wiki sees a different revision. The
+	// reconciler should now look up the cache, find firstRev, and
+	// produce ActionNoOp because content equality.
+	rep2, _ := build().Run(context.Background())
+	if rep2.Specs[0].Status != reporter.StatusSkipped {
+		t.Errorf("second run status = %q, want %q (cache should enable no-op detection)", rep2.Specs[0].Status, reporter.StatusSkipped)
 	}
 }
 

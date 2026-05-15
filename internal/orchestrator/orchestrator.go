@@ -9,10 +9,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"time"
 
 	"github.com/vilosource/mykb-curator/internal/adapters/kb"
 	"github.com/vilosource/mykb-curator/internal/adapters/specs"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki"
+	"github.com/vilosource/mykb-curator/internal/cache/runstate"
 	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
@@ -56,6 +58,14 @@ type Deps struct {
 	// no sink; the render still happens (so the run report is
 	// meaningful).
 	OnRendered func(specID string, rendered []byte, doc ir.Document) error
+
+	// RunState is the persistent per-spec state cache. When set, the
+	// reconciler's lastBotRevID is looked up here and the new
+	// revision ID is written back after each upsert. Nil falls back
+	// to first-render mode every run (acceptable but means human-
+	// edit detection only catches edits between renders that
+	// happened during the SAME run, which is not useful).
+	RunState *runstate.Cache
 }
 
 // Orchestrator drives one curator run end-to-end.
@@ -184,12 +194,14 @@ type pushResult struct {
 }
 
 // reconcileAndPush runs the reconciler against the current wiki
-// state and acts on the Decision. lastBotRevID is "" today (no
-// cache yet) — first-render mode every time. When the run-state
-// cache lands (v0.0.5), this becomes a lookup.
+// state and acts on the Decision. When o.deps.RunState is set, the
+// previous run's bot revision is looked up so the reconciler can
+// detect human edits since that point; otherwise first-render mode.
 func (o *Orchestrator) reconcileAndPush(ctx context.Context, s specs.Spec, rendered []byte) (pushResult, error) {
+	lastBotRevID := o.lookupLastBotRev(s.ID)
+
 	rec := reconciler.New(o.deps.WikiTarget)
-	dec, err := rec.Reconcile(ctx, s.Page, rendered, "" /* lastBotRevID */)
+	dec, err := rec.Reconcile(ctx, s.Page, rendered, lastBotRevID)
 	if err != nil {
 		return pushResult{}, err
 	}
@@ -201,6 +213,9 @@ func (o *Orchestrator) reconcileAndPush(ctx context.Context, s specs.Spec, rende
 	switch dec.Action {
 	case reconciler.ActionNoOp:
 		res.NoOp = true
+		// Persist updated last-run timestamp even on no-op, so the
+		// cache reflects that we checked this spec recently.
+		o.persistRunState(s.ID, lastBotRevID)
 		return res, nil
 	case reconciler.ActionCreate, reconciler.ActionUpsert:
 		summary := fmt.Sprintf("mykb-curator: spec=%s", s.ID)
@@ -209,10 +224,35 @@ func (o *Orchestrator) reconcileAndPush(ctx context.Context, s specs.Spec, rende
 			return pushResult{}, fmt.Errorf("upsert %q: %w", s.Page, err)
 		}
 		res.NewRevisionID = rev.ID
+		o.persistRunState(s.ID, rev.ID)
 		return res, nil
 	default:
 		return pushResult{}, fmt.Errorf("unknown reconciler action %q", dec.Action)
 	}
+}
+
+func (o *Orchestrator) lookupLastBotRev(specID string) string {
+	if o.deps.RunState == nil {
+		return ""
+	}
+	st, ok, err := o.deps.RunState.Get(specID)
+	if err != nil || !ok {
+		return ""
+	}
+	return st.LastBotRevID
+}
+
+func (o *Orchestrator) persistRunState(specID, revID string) {
+	if o.deps.RunState == nil {
+		return
+	}
+	// Best-effort write — a cache failure must not fail the run.
+	// The run report will record the upsert; next run with a working
+	// cache will pick up.
+	_ = o.deps.RunState.Set(specID, runstate.SpecState{
+		LastBotRevID: revID,
+		LastRunAt:    time.Now().UTC(),
+	})
 }
 
 // convertHumanEdits maps reconciler types to reporter types. Two

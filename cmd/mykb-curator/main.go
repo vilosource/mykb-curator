@@ -28,6 +28,7 @@ import (
 	wikipkg "github.com/vilosource/mykb-curator/internal/adapters/wiki"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki/mediawiki"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki/memory"
+	"github.com/vilosource/mykb-curator/internal/cache/runstate"
 	"github.com/vilosource/mykb-curator/internal/config"
 	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/orchestrator"
@@ -116,6 +117,14 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 
 	onRendered := composeOnRenderedSink(ctx, cfg, wikiTarget, outDir)
 
+	cache, cacheCloser, err := composeRunStateCache(cfg)
+	if err != nil {
+		return err
+	}
+	if cacheCloser != nil {
+		defer cacheCloser()
+	}
+
 	orch := orchestrator.New(orchestrator.Deps{
 		Wiki:       cfg.Wiki,
 		KB:         kbSrc,
@@ -126,6 +135,7 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 		Passes:     passPipeline,
 		Backend:    markdown.New(),
 		OnRendered: onRendered,
+		RunState:   cache,
 	})
 
 	report, err := orch.Run(ctx)
@@ -201,6 +211,25 @@ func makeWikiUpsertSink(ctx context.Context, target wikipkg.Target) func(string,
 		_, err := target.UpsertPage(ctx, title, string(rendered), summary)
 		return err
 	}
+}
+
+// composeRunStateCache opens the per-wiki bbolt cache. Returns a
+// nil cache (and nil closer) when no cache dir is configured —
+// orchestrator handles nil RunState gracefully (first-render mode).
+func composeRunStateCache(cfg *config.Config) (*runstate.Cache, func(), error) {
+	cacheDir := cfg.CacheDir
+	if cacheDir == "" {
+		cacheDir = filepath.Join(os.Getenv("HOME"), ".cache", "mykb-curator", cfg.Wiki)
+	}
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return nil, nil, fmt.Errorf("cache: mkdir %q: %w", cacheDir, err)
+	}
+	path := filepath.Join(cacheDir, "runstate.bolt")
+	c, err := runstate.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	return c, func() { _ = c.Close() }, nil
 }
 
 func composeWikiTarget(cfg *config.Config) (wikipkg.Target, error) {
