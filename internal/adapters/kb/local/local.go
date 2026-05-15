@@ -49,6 +49,13 @@ func New(dir string) *Source { return &Source{root: dir} }
 // Whoami returns a human-readable identity for run reports.
 func (s *Source) Whoami() string { return "local:" + s.root }
 
+// DiffSince always returns ErrDiffNotSupported — a filesystem path
+// has no commit history, so we can't tell what changed. Orchestrator
+// falls back to rendering all specs.
+func (s *Source) DiffSince(_ context.Context, _ string) ([]string, error) {
+	return nil, kb.ErrDiffNotSupported
+}
+
 // Pull loads the kb snapshot from disk.
 func (s *Source) Pull(_ context.Context) (kb.Snapshot, error) {
 	areasDir := filepath.Join(s.root, "areas")

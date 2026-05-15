@@ -30,6 +30,9 @@ type inMemKB struct{}
 func (inMemKB) Pull(context.Context) (kb.Snapshot, error) {
 	return kb.Snapshot{Commit: "skeleton-commit", ChangedAreas: []string{"vault"}}, nil
 }
+func (inMemKB) DiffSince(context.Context, string) ([]string, error) {
+	return nil, kb.ErrDiffNotSupported
+}
 func (inMemKB) Whoami() string { return "in-memory" }
 
 type inMemSpecs struct{ items []specs.Spec }

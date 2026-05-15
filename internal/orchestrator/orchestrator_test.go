@@ -30,6 +30,9 @@ func (f fakeKB) Pull(ctx context.Context) (kb.Snapshot, error) {
 	}
 	return kb.Snapshot{Commit: f.commit}, nil
 }
+func (fakeKB) DiffSince(context.Context, string) ([]string, error) {
+	return nil, kb.ErrDiffNotSupported
+}
 func (fakeKB) Whoami() string { return "fakeKB" }
 
 // fakeSpecs returns a fixed slice.
@@ -268,6 +271,137 @@ func TestRun_RunStateCache_RoundTripsBotRevAcrossRuns(t *testing.T) {
 	rep2, _ := build().Run(context.Background())
 	if rep2.Specs[0].Status != reporter.StatusSkipped {
 		t.Errorf("second run status = %q, want %q (cache should enable no-op detection)", rep2.Specs[0].Status, reporter.StatusSkipped)
+	}
+}
+
+// diffableKB returns a synthetic diff between specific commits.
+type diffableKB struct {
+	commit  string
+	diffMap map[string][]string // prevCommit → changed areas
+}
+
+func (d diffableKB) Pull(context.Context) (kb.Snapshot, error) {
+	return kb.Snapshot{Commit: d.commit}, nil
+}
+func (d diffableKB) DiffSince(_ context.Context, prev string) ([]string, error) {
+	if areas, ok := d.diffMap[prev]; ok {
+		return areas, nil
+	}
+	return nil, nil // no changes
+}
+func (diffableKB) Whoami() string { return "diffable" }
+
+func TestRun_DiffDriven_SkipsSpecWithUntouchedIncludes(t *testing.T) {
+	// Setup: prior run rendered spec "vault-page" at commit "C0" and
+	// "harbor-page" at commit "C0". Current commit is "C1"; the diff
+	// from C0→C1 touched only the "vault" area. The harbor spec
+	// should be skipped; vault should still render.
+	dir := t.TempDir()
+	rs, err := runstate.Open(filepath.Join(dir, "rs.bolt"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = rs.Close() }()
+
+	// Pre-populate cache: both specs have rendered at C0 previously.
+	_ = rs.Set("vault-page", runstate.SpecState{LastBotRevID: "rev-v", LastKBCommit: "C0"})
+	_ = rs.Set("harbor-page", runstate.SpecState{LastBotRevID: "rev-h", LastKBCommit: "C0"})
+
+	reg := frontends.NewRegistry()
+	reg.Register(fakeFrontend{})
+
+	wikiTarget := memory.New("User:Bot")
+
+	o := New(Deps{
+		Wiki: "acme",
+		KB: diffableKB{
+			commit:  "C1",
+			diffMap: map[string][]string{"C0": {"vault"}},
+		},
+		Specs: fakeSpecs{items: []specs.Spec{
+			{ID: "vault-page", Wiki: "acme", Page: "VaultPage", Kind: "projection",
+				Include: specs.IncludeFilter{Areas: []string{"vault"}}},
+			{ID: "harbor-page", Wiki: "acme", Page: "HarborPage", Kind: "projection",
+				Include: specs.IncludeFilter{Areas: []string{"harbor"}}},
+		}},
+		WikiTarget: wikiTarget,
+		LLM:        fakeLLM{},
+		Frontends:  reg,
+		Backend:    fakeBackend{},
+		RunState:   rs,
+	})
+
+	rep, err := o.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(rep.Specs) != 2 {
+		t.Fatalf("len(Specs) = %d, want 2", len(rep.Specs))
+	}
+	byID := map[string]reporter.SpecResult{}
+	for _, s := range rep.Specs {
+		byID[s.ID] = s
+	}
+	if byID["vault-page"].Status != reporter.StatusRendered {
+		t.Errorf("vault-page status = %q, want %q (diff touches its area)", byID["vault-page"].Status, reporter.StatusRendered)
+	}
+	if byID["harbor-page"].Status != reporter.StatusSkipped {
+		t.Errorf("harbor-page status = %q, want %q (diff does not touch its area)", byID["harbor-page"].Status, reporter.StatusSkipped)
+	}
+}
+
+func TestRun_DiffDriven_FirstRender_AlwaysRenders(t *testing.T) {
+	// Empty cache: no prior state for this spec. Diff-driven skip
+	// must NOT apply — spec has never rendered before.
+	dir := t.TempDir()
+	rs, _ := runstate.Open(filepath.Join(dir, "rs.bolt"))
+	defer func() { _ = rs.Close() }()
+
+	reg := frontends.NewRegistry()
+	reg.Register(fakeFrontend{})
+
+	o := New(Deps{
+		Wiki:       "acme",
+		KB:         diffableKB{commit: "C1", diffMap: map[string][]string{"C0": {"vault"}}},
+		Specs:      fakeSpecs{items: []specs.Spec{{ID: "new", Wiki: "acme", Page: "P", Kind: "projection", Include: specs.IncludeFilter{Areas: []string{"harbor"}}}}},
+		WikiTarget: memory.New("U"),
+		LLM:        fakeLLM{},
+		Frontends:  reg,
+		Backend:    fakeBackend{},
+		RunState:   rs,
+	})
+
+	rep, _ := o.Run(context.Background())
+	if rep.Specs[0].Status != reporter.StatusRendered {
+		t.Errorf("first-render spec status = %q, want %q (no cache → must render)", rep.Specs[0].Status, reporter.StatusRendered)
+	}
+}
+
+func TestRun_DiffDriven_KBUnchanged_SkipsAllPriorRenders(t *testing.T) {
+	// Cache says spec rendered at C1 last time; current commit is also
+	// C1. Must skip — no kb change at all.
+	dir := t.TempDir()
+	rs, _ := runstate.Open(filepath.Join(dir, "rs.bolt"))
+	defer func() { _ = rs.Close() }()
+	_ = rs.Set("p", runstate.SpecState{LastBotRevID: "r", LastKBCommit: "C1"})
+
+	reg := frontends.NewRegistry()
+	reg.Register(fakeFrontend{})
+
+	o := New(Deps{
+		Wiki:       "acme",
+		KB:         diffableKB{commit: "C1"},
+		Specs:      fakeSpecs{items: []specs.Spec{{ID: "p", Wiki: "acme", Page: "P", Kind: "projection", Include: specs.IncludeFilter{Areas: []string{"vault"}}}}},
+		WikiTarget: memory.New("U"),
+		LLM:        fakeLLM{},
+		Frontends:  reg,
+		Backend:    fakeBackend{},
+		RunState:   rs,
+	})
+
+	rep, _ := o.Run(context.Background())
+	if rep.Specs[0].Status != reporter.StatusSkipped {
+		t.Errorf("status = %q, want %q (kb commit unchanged)", rep.Specs[0].Status, reporter.StatusSkipped)
 	}
 }
 

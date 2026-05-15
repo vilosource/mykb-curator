@@ -5,7 +5,16 @@
 // orchestrator depends on Source, not on any concrete implementation.
 package kb
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrDiffNotSupported is returned by Source.DiffSince when the
+// adapter cannot compute a diff (no commit history, no prevCommit
+// supplied, etc.). The orchestrator treats this as "render
+// everything" — conservative fallback.
+var ErrDiffNotSupported = errors.New("kb source: diff not supported")
 
 // Source fetches kb snapshots. Implementations are expected to be
 // read-only against the canonical brain; writes go through a separate
@@ -14,6 +23,13 @@ type Source interface {
 	// Pull fetches the current state of the kb. Returns a snapshot and
 	// the commit identifier the snapshot was taken from.
 	Pull(ctx context.Context) (Snapshot, error)
+
+	// DiffSince returns the list of area IDs whose contents changed
+	// between prevCommit and the current HEAD. Returns
+	// ErrDiffNotSupported when the adapter cannot compute a diff
+	// (no commit history, no prevCommit, etc.) — orchestrator falls
+	// back to rendering all specs in that case.
+	DiffSince(ctx context.Context, prevCommit string) ([]string, error)
 
 	// Whoami reports the identity the adapter is operating as (e.g. a
 	// git remote URL, a local path). Used for run reports.

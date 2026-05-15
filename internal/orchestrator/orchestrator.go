@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -126,10 +127,80 @@ func (o *Orchestrator) Run(ctx context.Context) (reporter.Report, error) {
 			continue
 		}
 
+		if skip := o.diffDrivenSkip(ctx, s, snap); skip != nil {
+			rb.AddSpecResult(*skip)
+			continue
+		}
+
 		rb.AddSpecResult(o.processSpec(ctx, s, snap, passPipeline))
 	}
 
 	return rb.Build(), nil
+}
+
+// diffDrivenSkip decides whether to skip a spec because nothing it
+// cares about has changed since the last successful render. Returns
+// a SpecResult{Status=Skipped} if so, nil if the spec should render.
+//
+// Skip conditions (all must hold):
+//   - cache has prior state for this spec (LastKBCommit non-empty)
+//   - kb source can compute a diff (not ErrDiffNotSupported)
+//   - the diff does NOT intersect spec.Include.Areas
+//
+// First-render specs (no prior state) always render. Local kb
+// sources (no diff support) always render — conservative fallback.
+func (o *Orchestrator) diffDrivenSkip(ctx context.Context, s specs.Spec, snap kb.Snapshot) *reporter.SpecResult {
+	if o.deps.RunState == nil {
+		return nil
+	}
+	st, ok, err := o.deps.RunState.Get(s.ID)
+	if err != nil || !ok || st.LastKBCommit == "" {
+		return nil // first render or cache read failed — render to be safe
+	}
+	if st.LastKBCommit == snap.Commit {
+		// kb didn't move at all; any spec touching this kb is
+		// guaranteed to produce identical IR (modulo non-kb inputs
+		// like spec edits — but spec edits change spec.Hash, which
+		// already invalidates the IR cache when we add it).
+		return &reporter.SpecResult{
+			ID:     s.ID,
+			Status: reporter.StatusSkipped,
+			Reason: fmt.Sprintf("kb unchanged since last run (commit %s)", snap.Commit),
+		}
+	}
+	changed, err := o.deps.KB.DiffSince(ctx, st.LastKBCommit)
+	if errors.Is(err, kb.ErrDiffNotSupported) {
+		return nil // render
+	}
+	if err != nil {
+		// Diff failed for an unexpected reason — fall back to render.
+		// Safer to do work than skip silently.
+		return nil
+	}
+	if intersects(s.Include.Areas, changed) {
+		return nil // includes touched; render
+	}
+	return &reporter.SpecResult{
+		ID:     s.ID,
+		Status: reporter.StatusSkipped,
+		Reason: fmt.Sprintf("no kb changes in declared includes since commit %s (changed: %v)", st.LastKBCommit, changed),
+	}
+}
+
+func intersects(a, b []string) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	set := make(map[string]bool, len(a))
+	for _, x := range a {
+		set[x] = true
+	}
+	for _, y := range b {
+		if set[y] {
+			return true
+		}
+	}
+	return false
 }
 
 // processSpec runs the rendering pipeline for one spec and returns
@@ -182,7 +253,7 @@ func (o *Orchestrator) processSpec(ctx context.Context, s specs.Spec, snap kb.Sn
 	// edits since our last write, and tells us whether to upsert or
 	// no-op. Acting on the Decision is the orchestrator's job.
 	if rendered != nil && o.deps.WikiTarget != nil && s.Page != "" {
-		pushResult, err := o.reconcileAndPush(ctx, s, rendered)
+		pushResult, err := o.reconcileAndPush(ctx, s, rendered, snap.Commit)
 		if err != nil {
 			return reporter.SpecResult{ID: s.ID, Status: reporter.StatusFailed, Reason: err.Error()}
 		}
@@ -213,7 +284,7 @@ type pushResult struct {
 // state and acts on the Decision. When o.deps.RunState is set, the
 // previous run's bot revision is looked up so the reconciler can
 // detect human edits since that point; otherwise first-render mode.
-func (o *Orchestrator) reconcileAndPush(ctx context.Context, s specs.Spec, rendered []byte) (pushResult, error) {
+func (o *Orchestrator) reconcileAndPush(ctx context.Context, s specs.Spec, rendered []byte, kbCommit string) (pushResult, error) {
 	lastBotRevID := o.lookupLastBotRev(s.ID)
 
 	rec := reconciler.New(o.deps.WikiTarget)
@@ -229,9 +300,9 @@ func (o *Orchestrator) reconcileAndPush(ctx context.Context, s specs.Spec, rende
 	switch dec.Action {
 	case reconciler.ActionNoOp:
 		res.NoOp = true
-		// Persist updated last-run timestamp even on no-op, so the
-		// cache reflects that we checked this spec recently.
-		o.persistRunState(s.ID, lastBotRevID)
+		// Persist updated last-run kb-commit even on no-op so the
+		// next run's diff-driven skip works against this commit.
+		o.persistRunState(s.ID, lastBotRevID, kbCommit)
 		return res, nil
 	case reconciler.ActionCreate, reconciler.ActionUpsert:
 		summary := fmt.Sprintf("mykb-curator: spec=%s", s.ID)
@@ -240,7 +311,7 @@ func (o *Orchestrator) reconcileAndPush(ctx context.Context, s specs.Spec, rende
 			return pushResult{}, fmt.Errorf("upsert %q: %w", s.Page, err)
 		}
 		res.NewRevisionID = rev.ID
-		o.persistRunState(s.ID, rev.ID)
+		o.persistRunState(s.ID, rev.ID, kbCommit)
 		return res, nil
 	default:
 		return pushResult{}, fmt.Errorf("unknown reconciler action %q", dec.Action)
@@ -258,7 +329,7 @@ func (o *Orchestrator) lookupLastBotRev(specID string) string {
 	return st.LastBotRevID
 }
 
-func (o *Orchestrator) persistRunState(specID, revID string) {
+func (o *Orchestrator) persistRunState(specID, revID, kbCommit string) {
 	if o.deps.RunState == nil {
 		return
 	}
@@ -267,6 +338,7 @@ func (o *Orchestrator) persistRunState(specID, revID string) {
 	// cache will pick up.
 	_ = o.deps.RunState.Set(specID, runstate.SpecState{
 		LastBotRevID: revID,
+		LastKBCommit: kbCommit,
 		LastRunAt:    time.Now().UTC(),
 	})
 }

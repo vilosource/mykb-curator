@@ -17,9 +17,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 
 	"github.com/vilosource/mykb-curator/internal/adapters/kb"
 	"github.com/vilosource/mykb-curator/internal/adapters/kb/local"
@@ -100,26 +102,117 @@ func (s *Source) clone(ctx context.Context) (string, error) {
 	return head.Hash().String(), nil
 }
 
+// DiffSince returns the set of area IDs whose `areas/<id>/...` paths
+// changed between prevCommit and HEAD. Empty prevCommit yields
+// kb.ErrDiffNotSupported — orchestrator interprets as "render all".
+func (s *Source) DiffSince(ctx context.Context, prevCommit string) ([]string, error) {
+	if prevCommit == "" {
+		return nil, kb.ErrDiffNotSupported
+	}
+	repo, err := gogit.PlainOpen(s.workDir)
+	if err != nil {
+		return nil, fmt.Errorf("git kb diff: open: %w", err)
+	}
+	prev, err := commitOf(repo, prevCommit)
+	if err != nil {
+		return nil, fmt.Errorf("git kb diff: prev commit %s: %w", prevCommit, err)
+	}
+	head, err := commitOf(repo, "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("git kb diff: head: %w", err)
+	}
+	if prev.Hash == head.Hash {
+		return nil, nil // no changes
+	}
+
+	patch, err := prev.Patch(head)
+	if err != nil {
+		return nil, fmt.Errorf("git kb diff: patch: %w", err)
+	}
+
+	seen := map[string]bool{}
+	for _, fp := range patch.FilePatches() {
+		from, to := fp.Files()
+		paths := []string{}
+		if from != nil {
+			paths = append(paths, from.Path())
+		}
+		if to != nil {
+			paths = append(paths, to.Path())
+		}
+		for _, p := range paths {
+			if a := areaIDForPath(p); a != "" {
+				seen[a] = true
+			}
+		}
+	}
+
+	out := make([]string, 0, len(seen))
+	for a := range seen {
+		out = append(out, a)
+	}
+	// Sort for determinism — orchestrator and run reports want stable
+	// ordering across runs.
+	sortStrings(out)
+	return out, nil
+}
+
+// commitOf resolves a revision (hash or "HEAD") to its commit object.
+func commitOf(repo *gogit.Repository, rev string) (*object.Commit, error) {
+	hash, err := repo.ResolveRevision(plumbing.Revision(rev))
+	if err != nil {
+		return nil, err
+	}
+	return repo.CommitObject(*hash)
+}
+
+// areaIDForPath returns the area ID embedded in a kb repo path like
+// "areas/<id>/...". Returns "" for paths outside areas/.
+func areaIDForPath(p string) string {
+	if !strings.HasPrefix(p, "areas/") {
+		return ""
+	}
+	rest := strings.TrimPrefix(p, "areas/")
+	slash := strings.IndexByte(rest, '/')
+	if slash <= 0 {
+		return ""
+	}
+	return rest[:slash]
+}
+
+// sortStrings is a small inline sort to avoid importing sort just
+// for one call here. Bubble — set is tiny (one entry per changed area).
+func sortStrings(s []string) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j-1] > s[j]; j-- {
+			s[j-1], s[j] = s[j], s[j-1]
+		}
+	}
+}
+
 func (s *Source) fetchAndReset(ctx context.Context) (string, error) {
 	repo, err := gogit.PlainOpen(s.workDir)
 	if err != nil {
 		return "", fmt.Errorf("git kb: open workdir: %w", err)
 	}
-	err = repo.FetchContext(ctx, &gogit.FetchOptions{Force: true})
-	if err != nil && err != gogit.NoErrAlreadyUpToDate {
-		return "", fmt.Errorf("git kb: fetch: %w", err)
-	}
-
 	wt, err := repo.Worktree()
 	if err != nil {
 		return "", fmt.Errorf("git kb: worktree: %w", err)
+	}
+
+	// PullContext is fetch + fast-forward. Idempotent: returns
+	// NoErrAlreadyUpToDate when there are no new commits. Force-reset
+	// after handles any local divergence (shouldn't happen — we don't
+	// write — but defense in depth).
+	pullErr := wt.PullContext(ctx, &gogit.PullOptions{Force: true})
+	if pullErr != nil && pullErr != gogit.NoErrAlreadyUpToDate {
+		return "", fmt.Errorf("git kb: pull: %w", pullErr)
 	}
 
 	head, err := repo.Head()
 	if err != nil {
 		return "", fmt.Errorf("git kb: HEAD: %w", err)
 	}
-
 	if err := wt.Reset(&gogit.ResetOptions{Mode: gogit.HardReset, Commit: head.Hash()}); err != nil {
 		return "", fmt.Errorf("git kb: reset: %w", err)
 	}
