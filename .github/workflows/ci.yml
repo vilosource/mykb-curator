@@ -35,11 +35,10 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          # v2 — needed for modern Go (1.24+) typecheck. Requires
-          # action@v7 (action@v6 only knew v1.x). .golangci.yml is
-          # v2 format. Local devs need a matching v2 binary if they
-          # want `make lint` parity.
-          version: v2.0.2
+          # v2.4+ ships a Go-1.25-built binary, required to typecheck
+          # this repo (go.mod targets 1.25). Requires action@v7 (v6
+          # only knew golangci-lint v1.x).
+          version: latest
           args: --timeout=5m
 
       - name: tidy check
