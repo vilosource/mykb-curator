@@ -15,6 +15,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/adapters/kb"
 	"github.com/vilosource/mykb-curator/internal/adapters/specs"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki"
+	"github.com/vilosource/mykb-curator/internal/cache/ircache"
 	"github.com/vilosource/mykb-curator/internal/cache/runstate"
 	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/pipelines/maintenance"
@@ -76,6 +77,18 @@ type Deps struct {
 	// edit detection only catches edits between renders that
 	// happened during the SAME run, which is not useful).
 	RunState *runstate.Cache
+
+	// IRCache memoises rendered IR by (spec_hash, kb_subset_hash,
+	// pipeline_version). When set, the orchestrator skips the
+	// Frontend.Build call on hit and replays the cached IR.
+	// Especially valuable for LLM-driven editorial frontends.
+	// Nil = always run the frontend.
+	IRCache *ircache.Cache
+
+	// PipelineVersion is included in the IR cache key. Bump it
+	// whenever frontend/pass output behaviour changes so cached IR
+	// from older code is invalidated. Defaults to "v1" if unset.
+	PipelineVersion string
 
 	// Maintenance is the kb-maintenance pipeline (staleness, link-rot,
 	// etc.). When set, it runs after the spec loop against the same
@@ -258,7 +271,7 @@ func (o *Orchestrator) processSpec(ctx context.Context, s specs.Spec, snap kb.Sn
 		return reporter.SpecResult{ID: s.ID, Status: reporter.StatusFailed, Reason: err.Error()}
 	}
 
-	doc, err := frontend.Build(ctx, s, snap)
+	doc, err := o.buildOrReuseIR(ctx, s, snap, frontend)
 	if err != nil {
 		return reporter.SpecResult{ID: s.ID, Status: reporter.StatusFailed, Reason: fmt.Errorf("frontend %s: %w", frontend.Name(), err).Error()}
 	}
@@ -395,6 +408,36 @@ func convertHumanEdits(in []reconciler.HumanEditDetection) []reporter.HumanEditE
 		}
 	}
 	return out
+}
+
+// buildOrReuseIR returns the IR for a spec, either from the IR cache
+// (when configured and hit) or by calling the frontend (then
+// persisting). The cache key combines spec content, the spec's kb
+// subset, and the pipeline version so unrelated changes elsewhere
+// don't invalidate the cache.
+func (o *Orchestrator) buildOrReuseIR(ctx context.Context, s specs.Spec, snap kb.Snapshot, frontend frontends.Frontend) (ir.Document, error) {
+	if o.deps.IRCache == nil || s.Hash == "" {
+		// Cache disabled or spec has no content hash → no memoisation.
+		return frontend.Build(ctx, s, snap)
+	}
+	key := ircache.Key(s.Hash, ircache.HashKBSubset(snap, s.Include), o.pipelineVersion())
+	if cached, ok, err := o.deps.IRCache.Get(key); err == nil && ok {
+		return *cached, nil
+	}
+	doc, err := frontend.Build(ctx, s, snap)
+	if err != nil {
+		return ir.Document{}, err
+	}
+	// Persist best-effort: a write failure shouldn't fail the run.
+	_ = o.deps.IRCache.Set(key, doc)
+	return doc, nil
+}
+
+func (o *Orchestrator) pipelineVersion() string {
+	if o.deps.PipelineVersion == "" {
+		return "v1"
+	}
+	return o.deps.PipelineVersion
 }
 
 // countBlocks reports the total number of IR blocks across all

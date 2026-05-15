@@ -31,6 +31,7 @@ import (
 	wikipkg "github.com/vilosource/mykb-curator/internal/adapters/wiki"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki/mediawiki"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki/memory"
+	"github.com/vilosource/mykb-curator/internal/cache/ircache"
 	"github.com/vilosource/mykb-curator/internal/cache/runstate"
 	"github.com/vilosource/mykb-curator/internal/config"
 	"github.com/vilosource/mykb-curator/internal/llm"
@@ -146,6 +147,11 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 		defer cacheCloser()
 	}
 
+	irCache, err := composeIRCache(cfg)
+	if err != nil {
+		return err
+	}
+
 	orchLLM := llm.Client(stubLLM{})
 	if llmClient != nil {
 		orchLLM = llmClient
@@ -164,6 +170,7 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 		Backend:       markdown.New(),
 		OnRendered:    onRendered,
 		RunState:      cache,
+		IRCache:       irCache,
 		Maintenance:   maintPipeline,
 		OnMaintenance: onMaint,
 	})
@@ -388,6 +395,18 @@ func llmCacheDir(cfg *config.Config) string {
 		base = filepath.Join(os.Getenv("HOME"), ".cache", "mykb-curator", cfg.Wiki)
 	}
 	return filepath.Join(base, "llm")
+}
+
+// composeIRCache opens the per-wiki IR memoisation cache. Cache dir
+// defaults to <CacheDir>/ir or ~/.cache/mykb-curator/<wiki>/ir.
+// Always opens — disabling memoisation is a CLI flag, not a config
+// concern.
+func composeIRCache(cfg *config.Config) (*ircache.Cache, error) {
+	base := cfg.CacheDir
+	if base == "" {
+		base = filepath.Join(os.Getenv("HOME"), ".cache", "mykb-curator", cfg.Wiki)
+	}
+	return ircache.Open(filepath.Join(base, "ir"))
 }
 
 // composeRunStateCache opens the per-wiki bbolt cache. Returns a

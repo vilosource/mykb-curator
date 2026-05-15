@@ -11,6 +11,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/adapters/specs"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki/memory"
+	"github.com/vilosource/mykb-curator/internal/cache/ircache"
 	"github.com/vilosource/mykb-curator/internal/cache/runstate"
 	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
@@ -402,6 +403,118 @@ func TestRun_DiffDriven_KBUnchanged_SkipsAllPriorRenders(t *testing.T) {
 	rep, _ := o.Run(context.Background())
 	if rep.Specs[0].Status != reporter.StatusSkipped {
 		t.Errorf("status = %q, want %q (kb commit unchanged)", rep.Specs[0].Status, reporter.StatusSkipped)
+	}
+}
+
+// countingFrontend records how many times Build was called. Used to
+// prove the IR cache short-circuits.
+type countingFrontend struct {
+	calls int
+}
+
+func (c *countingFrontend) Name() string { return "counting" }
+func (c *countingFrontend) Kind() string { return "projection" }
+func (c *countingFrontend) Build(_ context.Context, s specs.Spec, _ kb.Snapshot) (ir.Document, error) {
+	c.calls++
+	return ir.Document{
+		Frontmatter: ir.Frontmatter{Title: s.Page, SpecHash: s.Hash},
+		Sections:    []ir.Section{{Heading: "S", Blocks: []ir.Block{ir.ProseBlock{Text: "x"}}}},
+	}, nil
+}
+
+func TestRun_IRCache_SkipsFrontendOnHit(t *testing.T) {
+	dir := t.TempDir()
+	cache, err := ircache.Open(filepath.Join(dir, "ir"))
+	if err != nil {
+		t.Fatalf("ircache.Open: %v", err)
+	}
+
+	front := &countingFrontend{}
+	reg := frontends.NewRegistry()
+	reg.Register(front)
+
+	build := func() *Orchestrator {
+		return New(Deps{
+			Wiki: "acme",
+			KB:   fakeKB{commit: "abc"},
+			Specs: fakeSpecs{items: []specs.Spec{
+				{ID: "p", Wiki: "acme", Page: "P", Kind: "projection", Hash: "spec-hash-v1"},
+			}},
+			WikiTarget: fakeWiki{},
+			LLM:        fakeLLM{},
+			Frontends:  reg,
+			Backend:    fakeBackend{},
+			IRCache:    cache,
+		})
+	}
+
+	_, _ = build().Run(context.Background())
+	if front.calls != 1 {
+		t.Fatalf("first run frontend calls = %d, want 1 (cache miss)", front.calls)
+	}
+
+	_, _ = build().Run(context.Background())
+	if front.calls != 1 {
+		t.Errorf("second run frontend calls = %d, want still 1 (cache hit)", front.calls)
+	}
+}
+
+func TestRun_IRCache_DifferentSpecHashes_BothCallFrontend(t *testing.T) {
+	dir := t.TempDir()
+	cache, _ := ircache.Open(filepath.Join(dir, "ir"))
+
+	front := &countingFrontend{}
+	reg := frontends.NewRegistry()
+	reg.Register(front)
+
+	o := New(Deps{
+		Wiki: "acme",
+		KB:   fakeKB{commit: "abc"},
+		Specs: fakeSpecs{items: []specs.Spec{
+			{ID: "a", Wiki: "acme", Page: "A", Kind: "projection", Hash: "h1"},
+			{ID: "b", Wiki: "acme", Page: "B", Kind: "projection", Hash: "h2"},
+		}},
+		WikiTarget: fakeWiki{},
+		LLM:        fakeLLM{},
+		Frontends:  reg,
+		Backend:    fakeBackend{},
+		IRCache:    cache,
+	})
+	_, _ = o.Run(context.Background())
+	if front.calls != 2 {
+		t.Errorf("calls = %d, want 2 (distinct spec hashes are distinct cache keys)", front.calls)
+	}
+}
+
+func TestRun_IRCache_DisabledWithoutSpecHash(t *testing.T) {
+	dir := t.TempDir()
+	cache, _ := ircache.Open(filepath.Join(dir, "ir"))
+
+	front := &countingFrontend{}
+	reg := frontends.NewRegistry()
+	reg.Register(front)
+
+	build := func() *Orchestrator {
+		return New(Deps{
+			Wiki: "acme",
+			KB:   fakeKB{commit: "abc"},
+			Specs: fakeSpecs{items: []specs.Spec{
+				// Hash empty — cache must be bypassed (otherwise specs
+				// pre-hash would all collide under the empty key).
+				{ID: "p", Wiki: "acme", Page: "P", Kind: "projection"},
+			}},
+			WikiTarget: fakeWiki{},
+			LLM:        fakeLLM{},
+			Frontends:  reg,
+			Backend:    fakeBackend{},
+			IRCache:    cache,
+		})
+	}
+
+	_, _ = build().Run(context.Background())
+	_, _ = build().Run(context.Background())
+	if front.calls != 2 {
+		t.Errorf("calls = %d, want 2 (empty spec.Hash should bypass the cache)", front.calls)
 	}
 }
 
