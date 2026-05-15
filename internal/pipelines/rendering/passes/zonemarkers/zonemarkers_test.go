@@ -28,20 +28,26 @@ func TestApply_EmptyDocument_NoOp(t *testing.T) {
 	}
 }
 
-func TestApply_NoMachineBlocks_PreservesBlocksUntouched(t *testing.T) {
+func TestApply_EditorialBlocks_AlsoGetMarkers(t *testing.T) {
+	// v0.6: editorial blocks (prose, editorial callouts) also get
+	// wrapped in markers — needed for block-level reconciliation to
+	// detect human polish and preserve it across re-renders.
 	in := ir.Document{Sections: []ir.Section{{
 		Heading: "S",
 		Blocks: []ir.Block{
-			ir.ProseBlock{Text: "prose"},
+			ir.ProseBlock{Text: "prose", Prov: ir.Provenance{InputHash: "h-prose"}},
 			ir.Callout{Severity: "note", Body: "callout"},
 		},
 	}}}
 	out, _ := New().Apply(context.Background(), in)
-	if got := len(out.Sections[0].Blocks); got != 2 {
-		t.Fatalf("len(Blocks) = %d, want 2 (no markers should be added)", got)
+	if got := len(out.Sections[0].Blocks); got != 6 {
+		t.Fatalf("len(Blocks) = %d, want 6 (begin+block+end × 2 editorial blocks)", got)
 	}
-	if _, ok := out.Sections[0].Blocks[0].(ir.ProseBlock); !ok {
-		t.Errorf("block[0] is not ProseBlock; type=%T", out.Sections[0].Blocks[0])
+	if mb, ok := out.Sections[0].Blocks[0].(ir.MarkerBlock); !ok || mb.Position != ir.MarkerBegin {
+		t.Errorf("blocks[0]: want MarkerBlock{begin}, got %T %+v", out.Sections[0].Blocks[0], out.Sections[0].Blocks[0])
+	}
+	if _, ok := out.Sections[0].Blocks[1].(ir.ProseBlock); !ok {
+		t.Errorf("blocks[1]: want ProseBlock, got %T", out.Sections[0].Blocks[1])
 	}
 }
 
@@ -113,28 +119,20 @@ func TestApply_WrapsEachMachineBlockIndependently(t *testing.T) {
 	}
 }
 
-func TestApply_PreservesInterleavedEditorialBlocks(t *testing.T) {
+func TestApply_InterleavedBlocks_AllWrapped(t *testing.T) {
+	// v0.6: prose, machine, prose → each wrapped in begin+end markers.
 	in := ir.Document{Sections: []ir.Section{{
 		Blocks: []ir.Block{
-			ir.ProseBlock{Text: "intro"},
-			ir.MachineBlock{BlockID: "tbl", Body: "rows", Prov: ir.Provenance{InputHash: "h"}},
-			ir.ProseBlock{Text: "outro"},
+			ir.ProseBlock{Text: "intro", Prov: ir.Provenance{InputHash: "h1"}},
+			ir.MachineBlock{BlockID: "tbl", Body: "rows", Prov: ir.Provenance{InputHash: "h2"}},
+			ir.ProseBlock{Text: "outro", Prov: ir.Provenance{InputHash: "h3"}},
 		},
 	}}}
 	out, _ := New().Apply(context.Background(), in)
 	blocks := out.Sections[0].Blocks
-	// expected: prose, begin, machine, end, prose
-	if len(blocks) != 5 {
-		t.Fatalf("len(Blocks) = %d, want 5; got %+v", len(blocks), blocks)
-	}
-	if _, ok := blocks[0].(ir.ProseBlock); !ok {
-		t.Errorf("blocks[0] should remain ProseBlock; type=%T", blocks[0])
-	}
-	if mb, ok := blocks[1].(ir.MarkerBlock); !ok || mb.Position != ir.MarkerBegin {
-		t.Errorf("blocks[1] should be MarkerBlock{begin}; got %T %+v", blocks[1], blocks[1])
-	}
-	if _, ok := blocks[4].(ir.ProseBlock); !ok {
-		t.Errorf("blocks[4] should remain ProseBlock; type=%T", blocks[4])
+	// expected: begin, prose, end, begin, machine, end, begin, prose, end
+	if len(blocks) != 9 {
+		t.Fatalf("len(Blocks) = %d, want 9 (3 blocks × {begin, content, end}); got %+v", len(blocks), blocks)
 	}
 }
 

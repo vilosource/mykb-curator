@@ -13,7 +13,7 @@ Vault is the centralised secrets manager.
 
 ## Resource Groups
 
-<!-- CURATOR:BEGIN block=rg-table provenance=h1 -->
+<!-- CURATOR:BEGIN block=rg-table zone=machine provenance=h1 -->
 
 | rg-vault-prod | swedencentral | shared |
 

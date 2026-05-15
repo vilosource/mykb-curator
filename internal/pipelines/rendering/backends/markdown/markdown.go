@@ -126,10 +126,18 @@ func writeMachineBlock(buf *bytes.Buffer, b ir.MachineBlock) {
 // writeMarkerBlock renders a zone-region boundary as an HTML comment.
 // HTML comments are inert in markdown, wikitext, and Confluence
 // storage format, so the same syntax works across all three.
+//
+// BEGIN markers carry zone + provenance attributes; END markers
+// carry only the block id (zone + provenance are repeated in the
+// matching BEGIN and don't need duplication).
 func writeMarkerBlock(buf *bytes.Buffer, b ir.MarkerBlock) {
 	switch b.Position {
 	case ir.MarkerBegin:
-		fmt.Fprintf(buf, "<!-- CURATOR:BEGIN block=%s provenance=%s -->\n", b.BlockID, b.Prov.InputHash)
+		zone := b.OfZone
+		if zone == "" {
+			zone = "machine"
+		}
+		fmt.Fprintf(buf, "<!-- CURATOR:BEGIN block=%s zone=%s provenance=%s -->\n", b.BlockID, zone, b.Prov.InputHash)
 	case ir.MarkerEnd:
 		fmt.Fprintf(buf, "<!-- CURATOR:END block=%s -->\n", b.BlockID)
 	}

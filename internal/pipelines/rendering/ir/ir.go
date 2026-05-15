@@ -183,8 +183,19 @@ const (
 // place (the pass) and every backend renders mechanically.
 type MarkerBlock struct {
 	Position MarkerPosition
-	BlockID  string // matches the MachineBlock the marker brackets
+	BlockID  string // matches the block the marker brackets
 	Prov     Provenance
+
+	// OfZone describes what kind of block this marker brackets:
+	// "machine" or "editorial". Surfaces in the wiki marker so the
+	// reconciler — reading the wiki page back — knows whether to
+	// preserve content (editorial + matching provenance) or
+	// overwrite (machine, or different provenance).
+	//
+	// Distinct from MarkerBlock.Zone() — that returns the marker's
+	// OWN zone (always machine; markers are never preserved). This
+	// is the bracketed block's zone.
+	OfZone string
 }
 
 func (MarkerBlock) Kind() string             { return "marker" }

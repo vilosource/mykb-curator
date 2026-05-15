@@ -128,7 +128,8 @@ func TestRender_MarkerBlock_RendersAsHTMLComment(t *testing.T) {
 	}
 	out, _ := New().Render(doc)
 	s := string(out)
-	if !strings.Contains(s, "<!-- CURATOR:BEGIN block=rg-table provenance=abc123 -->") {
+	// BEGIN markers now include zone (machine|editorial) and provenance.
+	if !strings.Contains(s, "<!-- CURATOR:BEGIN block=rg-table zone=machine provenance=abc123 -->") {
 		t.Errorf("missing BEGIN marker rendering:\n%s", s)
 	}
 	if !strings.Contains(s, "<!-- CURATOR:END block=rg-table -->") {
