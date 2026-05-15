@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -9,6 +10,8 @@ import (
 	"github.com/vilosource/mykb-curator/internal/adapters/specs"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki"
 	"github.com/vilosource/mykb-curator/internal/llm"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
 	"github.com/vilosource/mykb-curator/internal/reporter"
 )
 
@@ -58,7 +61,10 @@ func (fakeLLM) Complete(ctx context.Context, _ llm.Request) (llm.Response, error
 	return llm.Response{}, nil
 }
 
-func TestRun_HappyPath_RecordsAllSpecsAsSkipped(t *testing.T) {
+func TestRun_HappyPath_NoPipeline_RecordsSkipped(t *testing.T) {
+	// With Frontends == nil, the rendering pipeline is not wired and
+	// every valid spec is recorded as Skipped. This preserves the
+	// v0.0 walking-skeleton behaviour for partial deployments.
 	o := New(Deps{
 		Wiki: "acme",
 		KB:   fakeKB{commit: "abc123"},
@@ -104,6 +110,103 @@ func TestRun_WikiMismatch_FailsSpec(t *testing.T) {
 	}
 	if rep.Specs[0].Status != reporter.StatusFailed {
 		t.Errorf("status = %q, want %q", rep.Specs[0].Status, reporter.StatusFailed)
+	}
+}
+
+// fakeFrontend builds a tiny Document so the rendering pipeline has
+// something to push through.
+type fakeFrontend struct{}
+
+func (fakeFrontend) Name() string { return "fake-frontend" }
+func (fakeFrontend) Kind() string { return "projection" }
+func (fakeFrontend) Build(_ context.Context, s specs.Spec, _ kb.Snapshot) (ir.Document, error) {
+	return ir.Document{
+		Frontmatter: ir.Frontmatter{Title: s.Page},
+		Sections: []ir.Section{{
+			Heading: "Generated",
+			Blocks:  []ir.Block{ir.ProseBlock{Text: "from " + s.ID}},
+		}},
+	}, nil
+}
+
+// fakeBackend renders by concatenating prose-block text. Pure.
+type fakeBackend struct{}
+
+func (fakeBackend) Name() string { return "fake-backend" }
+func (fakeBackend) Render(doc ir.Document) ([]byte, error) {
+	var s string
+	for _, sec := range doc.Sections {
+		for _, b := range sec.Blocks {
+			if p, ok := b.(ir.ProseBlock); ok {
+				s += p.Text + "\n"
+			}
+		}
+	}
+	return []byte(s), nil
+}
+
+func TestRun_WiredPipeline_RendersSpec(t *testing.T) {
+	reg := frontends.NewRegistry()
+	reg.Register(fakeFrontend{})
+
+	var captured map[string][]byte
+	o := New(Deps{
+		Wiki: "acme",
+		KB:   fakeKB{commit: "abc"},
+		Specs: fakeSpecs{items: []specs.Spec{
+			{ID: "page-a", Wiki: "acme", Page: "PageA", Kind: "projection"},
+		}},
+		WikiTarget: fakeWiki{},
+		LLM:        fakeLLM{},
+		Frontends:  reg,
+		Backend:    fakeBackend{},
+		OnRendered: func(id string, b []byte, _ ir.Document) error {
+			if captured == nil {
+				captured = map[string][]byte{}
+			}
+			captured[id] = b
+			return nil
+		},
+	})
+
+	rep, err := o.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(rep.Specs) != 1 {
+		t.Fatalf("len(Specs) = %d, want 1", len(rep.Specs))
+	}
+	if rep.Specs[0].Status != reporter.StatusRendered {
+		t.Errorf("status = %q, want %q", rep.Specs[0].Status, reporter.StatusRendered)
+	}
+	if rep.Specs[0].BlocksRegenerated != 1 {
+		t.Errorf("BlocksRegenerated = %d, want 1", rep.Specs[0].BlocksRegenerated)
+	}
+	if !bytes.Contains(captured["page-a"], []byte("from page-a")) {
+		t.Errorf("captured render does not contain expected content: %s", captured["page-a"])
+	}
+}
+
+func TestRun_WiredPipeline_UnknownKind_FailsSpec(t *testing.T) {
+	reg := frontends.NewRegistry()
+	// Only projection registered.
+	reg.Register(fakeFrontend{})
+
+	o := New(Deps{
+		Wiki: "acme",
+		KB:   fakeKB{commit: "abc"},
+		Specs: fakeSpecs{items: []specs.Spec{
+			{ID: "x", Wiki: "acme", Page: "X", Kind: "editorial"},
+		}},
+		WikiTarget: fakeWiki{},
+		LLM:        fakeLLM{},
+		Frontends:  reg,
+		Backend:    fakeBackend{},
+	})
+
+	rep, _ := o.Run(context.Background())
+	if rep.Specs[0].Status != reporter.StatusFailed {
+		t.Errorf("status = %q, want %q (no editorial frontend registered)", rep.Specs[0].Status, reporter.StatusFailed)
 	}
 }
 

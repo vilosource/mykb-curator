@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -28,6 +29,12 @@ import (
 	"github.com/vilosource/mykb-curator/internal/config"
 	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/orchestrator"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends/markdown"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/projection"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes/zonemarkers"
 )
 
 var (
@@ -52,7 +59,7 @@ func newRootCmd() *cobra.Command {
 }
 
 func newRunCmd() *cobra.Command {
-	var wiki, configPath string
+	var wiki, configPath, outDir string
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Execute one curator pass",
@@ -68,11 +75,12 @@ func newRunCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runFromConfig(cmd.Context(), cfg)
+			return runFromConfig(cmd.Context(), cfg, outDir)
 		},
 	}
 	cmd.Flags().StringVar(&wiki, "wiki", "", "wiki tenant name (matches the config filename)")
 	cmd.Flags().StringVar(&configPath, "config", "", "config file path (defaults to ~/.config/mykb-curator/<wiki>.yaml)")
+	cmd.Flags().StringVar(&outDir, "out", "", "if set, write rendered markdown for each spec to <out>/<spec-id>.md (no wiki push yet)")
 	return cmd
 }
 
@@ -83,24 +91,33 @@ func newRunCmd() *cobra.Command {
 // LLM client are still stubbed — concrete impls land per roadmap.
 // Any spec-store type other than "local" returns a clear error so
 // the user knows what's implemented vs not.
-func runFromConfig(ctx context.Context, cfg *config.Config) error {
+func runFromConfig(ctx context.Context, cfg *config.Config, outDir string) error {
 	specStore, err := composeSpecStore(cfg)
 	if err != nil {
 		return err
 	}
-	kb, err := composeKBSource(cfg)
+	kbSrc, err := composeKBSource(cfg)
 	if err != nil {
 		return err
 	}
-	wiki := stubWikiTarget{}
-	llmClient := stubLLM{}
+
+	frontendRegistry := frontends.NewRegistry()
+	frontendRegistry.Register(projection.New())
+
+	passPipeline := passes.NewPipeline(zonemarkers.New())
+
+	onRendered := buildOnRenderedSink(outDir)
 
 	orch := orchestrator.New(orchestrator.Deps{
 		Wiki:       cfg.Wiki,
-		KB:         kb,
+		KB:         kbSrc,
 		Specs:      specStore,
-		WikiTarget: wiki,
-		LLM:        llmClient,
+		WikiTarget: stubWikiTarget{},
+		LLM:        stubLLM{},
+		Frontends:  frontendRegistry,
+		Passes:     passPipeline,
+		Backend:    markdown.New(),
+		OnRendered: onRendered,
 	})
 
 	report, err := orch.Run(ctx)
@@ -111,9 +128,29 @@ func runFromConfig(ctx context.Context, cfg *config.Config) error {
 	}
 	fmt.Println(report.Summary())
 	for _, s := range report.Specs {
-		fmt.Printf("  spec=%s status=%s %s\n", s.ID, s.Status, s.Reason)
+		fmt.Printf("  spec=%s status=%s blocks=%d %s\n", s.ID, s.Status, s.BlocksRegenerated, s.Reason)
 	}
 	return nil
+}
+
+// buildOnRenderedSink returns a sink that writes each rendered spec
+// to <outDir>/<spec-id-sans-slashes>.md if outDir is non-empty.
+// Returns nil for an empty outDir, which means "render but discard"
+// — useful for smoke runs.
+func buildOnRenderedSink(outDir string) func(string, []byte, ir.Document) error {
+	if outDir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: cannot create out dir:", err)
+		return nil
+	}
+	return func(specID string, rendered []byte, _ ir.Document) error {
+		safe := strings.ReplaceAll(specID, "/", "_")
+		safe = strings.TrimSuffix(safe, ".spec.md")
+		path := filepath.Join(outDir, safe+".md")
+		return os.WriteFile(path, rendered, 0o600)
+	}
 }
 
 func composeSpecStore(cfg *config.Config) (specs.Store, error) {

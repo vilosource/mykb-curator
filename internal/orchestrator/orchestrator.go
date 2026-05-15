@@ -14,18 +14,47 @@ import (
 	"github.com/vilosource/mykb-curator/internal/adapters/specs"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki"
 	"github.com/vilosource/mykb-curator/internal/llm"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes"
 	"github.com/vilosource/mykb-curator/internal/reporter"
 )
 
 // Deps holds every collaborator the orchestrator needs. The
 // composition root constructs concrete impls and passes them in;
 // tests pass fakes.
+//
+// Frontends, Passes, and Backend are optional in v0.0.1: a nil
+// Frontends registry causes the orchestrator to record specs as
+// Skipped (the v0.0 walking-skeleton behaviour). Wiring them
+// enables the full rendering pipeline.
 type Deps struct {
 	Wiki       string // tenant id, for the report
 	KB         kb.Source
 	Specs      specs.Store
 	WikiTarget wiki.Target
 	LLM        llm.Client
+
+	// Frontends dispatches by spec.Kind to a Frontend that builds IR.
+	// If nil, the rendering pipeline is not run; specs are reported
+	// as Skipped.
+	Frontends *frontends.Registry
+
+	// Passes runs after each Frontend.Build, transforming the IR
+	// (e.g., ApplyZoneMarkers). Empty pipeline = no transformation.
+	Passes *passes.Pipeline
+
+	// Backend renders the final IR to the target format. Required
+	// when Frontends is set.
+	Backend backends.Backend
+
+	// OnRendered is an optional sink invoked after a spec renders
+	// cleanly. The composition root attaches this to either a file
+	// writer (CLI dump mode) or a wiki upserter (production). Nil =
+	// no sink; the render still happens (so the run report is
+	// meaningful).
+	OnRendered func(specID string, rendered []byte, doc ir.Document) error
 }
 
 // Orchestrator drives one curator run end-to-end.
@@ -70,16 +99,74 @@ func (o *Orchestrator) Run(ctx context.Context) (reporter.Report, error) {
 			continue
 		}
 
-		// v0.0 stub: every spec is recorded as skipped until the
-		// rendering pipeline lands.
-		rb.AddSpecResult(reporter.SpecResult{
-			ID:     s.ID,
-			Status: reporter.StatusSkipped,
-			Reason: "rendering pipeline not yet implemented (v0.0 walking skeleton)",
-		})
+		rb.AddSpecResult(o.processSpec(ctx, s, snap))
 	}
 
 	return rb.Build(), nil
+}
+
+// processSpec runs the rendering pipeline for one spec and returns
+// the SpecResult to record. If the rendering pipeline is not wired
+// (no Frontends registry), the spec is recorded as Skipped — the
+// v0.0 walking-skeleton behaviour, preserved so partial deployments
+// still produce useful run reports.
+func (o *Orchestrator) processSpec(ctx context.Context, s specs.Spec, snap kb.Snapshot) reporter.SpecResult {
+	if o.deps.Frontends == nil {
+		return reporter.SpecResult{
+			ID:     s.ID,
+			Status: reporter.StatusSkipped,
+			Reason: "rendering pipeline not wired (orchestrator.Deps.Frontends == nil)",
+		}
+	}
+
+	frontend, err := o.deps.Frontends.For(s.Kind)
+	if err != nil {
+		return reporter.SpecResult{ID: s.ID, Status: reporter.StatusFailed, Reason: err.Error()}
+	}
+
+	doc, err := frontend.Build(ctx, s, snap)
+	if err != nil {
+		return reporter.SpecResult{ID: s.ID, Status: reporter.StatusFailed, Reason: fmt.Errorf("frontend %s: %w", frontend.Name(), err).Error()}
+	}
+
+	if o.deps.Passes != nil {
+		doc, err = o.deps.Passes.Apply(ctx, doc)
+		if err != nil {
+			return reporter.SpecResult{ID: s.ID, Status: reporter.StatusFailed, Reason: err.Error()}
+		}
+	}
+
+	var rendered []byte
+	if o.deps.Backend != nil {
+		rendered, err = o.deps.Backend.Render(doc)
+		if err != nil {
+			return reporter.SpecResult{ID: s.ID, Status: reporter.StatusFailed, Reason: fmt.Errorf("backend %s: %w", o.deps.Backend.Name(), err).Error()}
+		}
+	}
+
+	if o.deps.OnRendered != nil && rendered != nil {
+		if err := o.deps.OnRendered(s.ID, rendered, doc); err != nil {
+			return reporter.SpecResult{ID: s.ID, Status: reporter.StatusFailed, Reason: err.Error()}
+		}
+	}
+
+	return reporter.SpecResult{
+		ID:                s.ID,
+		Status:            reporter.StatusRendered,
+		BlocksRegenerated: countBlocks(doc),
+	}
+}
+
+// countBlocks reports the total number of IR blocks across all
+// sections. Used to populate the BlocksRegenerated field of the
+// run report — gives operators a sense of how much content each
+// spec produced this run.
+func countBlocks(doc ir.Document) int {
+	n := 0
+	for _, sec := range doc.Sections {
+		n += len(sec.Blocks)
+	}
+	return n
 }
 
 // validateSpecForWiki enforces the frontmatter-as-guardrail rule:
