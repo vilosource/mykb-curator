@@ -163,6 +163,12 @@ func (t *Target) UpsertPage(ctx context.Context, title, content, summary string)
 	if err := t.ensureAuth(ctx); err != nil {
 		return wiki.Revision{}, fmt.Errorf("mediawiki: auth: %w", err)
 	}
+	// MediaWiki csrftokens are session-scoped but some installations
+	// (notably fresh SQLite installs) rotate them after each write.
+	// Force a fresh fetch before every edit so back-to-back edits
+	// don't hit badtoken. Cost: one extra round-trip per edit;
+	// correctness is worth it.
+	delete(t.client.Tokens, "csrf")
 	if err := t.client.Edit(params.Values{
 		"title":   title,
 		"text":    content,
