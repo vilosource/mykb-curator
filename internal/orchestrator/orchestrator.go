@@ -21,11 +21,11 @@ import (
 // composition root constructs concrete impls and passes them in;
 // tests pass fakes.
 type Deps struct {
-	Wiki      string // tenant id, for the report
-	KB        kb.Source
-	Specs     specs.Store
+	Wiki       string // tenant id, for the report
+	KB         kb.Source
+	Specs      specs.Store
 	WikiTarget wiki.Target
-	LLM       llm.Client
+	LLM        llm.Client
 }
 
 // Orchestrator drives one curator run end-to-end.

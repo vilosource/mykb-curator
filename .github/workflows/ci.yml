@@ -35,7 +35,9 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          # Pinned to v1.x to match the project's local config format.
+          # Bump (and migrate .golangci.yml to v2 syntax) deliberately.
+          version: v1.64.8
           args: --timeout=5m
 
       - name: tidy check

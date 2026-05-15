@@ -18,7 +18,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	kbpkg "github.com/vilosource/mykb-curator/internal/adapters/kb"
+	"github.com/vilosource/mykb-curator/internal/adapters/specs"
+	"github.com/vilosource/mykb-curator/internal/adapters/specs/localfs"
+	wikipkg "github.com/vilosource/mykb-curator/internal/adapters/wiki"
 	"github.com/vilosource/mykb-curator/internal/config"
+	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/orchestrator"
 )
 
@@ -56,14 +61,11 @@ func newRunCmd() *cobra.Command {
 				configPath = fmt.Sprintf("%s/.config/mykb-curator/%s.yaml", os.Getenv("HOME"), wiki)
 			}
 
-			// v0.0: walking-skeleton path — load config, but no real
-			// adapters are wired yet. Concrete adapters land in
-			// subsequent PRs per the roadmap (v0.1).
-			_, err := config.Load(configPath)
+			cfg, err := config.Load(configPath)
 			if err != nil {
 				return err
 			}
-			return runWalkingSkeleton(cmd.Context(), wiki)
+			return runFromConfig(cmd.Context(), cfg)
 		},
 	}
 	cmd.Flags().StringVar(&wiki, "wiki", "", "wiki tenant name (matches the config filename)")
@@ -71,22 +73,90 @@ func newRunCmd() *cobra.Command {
 	return cmd
 }
 
-// runWalkingSkeleton is the v0.0 demo path that proves the wiring
-// compiles end-to-end. It is intentionally short on substance —
-// concrete adapters are not yet implemented. Replaced incrementally
-// as v0.1 lands.
-func runWalkingSkeleton(_ context.Context, wiki string) error {
-	fmt.Printf("mykb-curator v0.0 — walking-skeleton run for wiki=%s\n", wiki)
-	fmt.Println("(no adapters wired yet; see docs/DESIGN.md §17 roadmap for v0.1 deliverables)")
+// runFromConfig is the composition root: it constructs concrete
+// adapter implementations from the config and runs the orchestrator.
+//
+// v0.0.1 wires the local-fs spec store. KB source, wiki target, and
+// LLM client are still stubbed — concrete impls land per roadmap.
+// Any spec-store type other than "local" returns a clear error so
+// the user knows what's implemented vs not.
+func runFromConfig(ctx context.Context, cfg *config.Config) error {
+	specStore, err := composeSpecStore(cfg)
+	if err != nil {
+		return err
+	}
+	kb := stubKBSource{}
+	wiki := stubWikiTarget{}
+	llmClient := stubLLM{}
 
-	// We deliberately do NOT construct an Orchestrator here yet, because
-	// the concrete adapter implementations have not landed. Tests
-	// exercise the Orchestrator with fakes — see
-	// internal/orchestrator/orchestrator_test.go and
-	// test/integration/orchestrator_skeleton_test.go.
-	_ = orchestrator.Orchestrator{}
+	orch := orchestrator.New(orchestrator.Deps{
+		Wiki:       cfg.Wiki,
+		KB:         kb,
+		Specs:      specStore,
+		WikiTarget: wiki,
+		LLM:        llmClient,
+	})
 
+	report, err := orch.Run(ctx)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "run failed:", err)
+		fmt.Fprintln(os.Stderr, report.Summary())
+		return err
+	}
+	fmt.Println(report.Summary())
+	for _, s := range report.Specs {
+		fmt.Printf("  spec=%s status=%s %s\n", s.ID, s.Status, s.Reason)
+	}
 	return nil
+}
+
+func composeSpecStore(cfg *config.Config) (specs.Store, error) {
+	switch cfg.SpecStore.Type {
+	case "local":
+		if cfg.SpecStore.Repo == "" {
+			return nil, fmt.Errorf("spec_store.repo: required for type=local (path to the spec directory)")
+		}
+		return localfs.New(cfg.SpecStore.Repo), nil
+	case "git":
+		return nil, fmt.Errorf("spec_store.type=git: not yet implemented (v0.1 roadmap)")
+	default:
+		return nil, fmt.Errorf("spec_store.type=%q: unknown", cfg.SpecStore.Type)
+	}
+}
+
+// Stub adapters fill in for the kb / wiki / llm slots until their
+// concrete impls land. They are deliberately minimal: kb returns a
+// hardcoded snapshot so the orchestrator's spec-validation logic
+// can exercise the spec store; wiki and llm are unused in the
+// current run loop (rendering pipeline not yet implemented).
+
+type stubKBSource struct{}
+
+func (stubKBSource) Pull(context.Context) (kbpkg.Snapshot, error) {
+	return kbpkg.Snapshot{Commit: "stub"}, nil
+}
+func (stubKBSource) Whoami() string { return "stub-kb" }
+
+type stubWikiTarget struct{}
+
+func (stubWikiTarget) Whoami(context.Context) (string, error) { return "stub-wiki", nil }
+func (stubWikiTarget) GetPage(context.Context, string) (*wikipkg.Page, error) {
+	return nil, nil
+}
+func (stubWikiTarget) UpsertPage(context.Context, string, string, string) (wikipkg.Revision, error) {
+	return wikipkg.Revision{}, nil
+}
+func (stubWikiTarget) History(context.Context, string, string) ([]wikipkg.Revision, error) {
+	return nil, nil
+}
+func (stubWikiTarget) HumanEditsSinceBot(context.Context, string, string) (*wikipkg.HumanEdit, error) {
+	return nil, nil
+}
+
+type stubLLM struct{}
+
+func (stubLLM) Complete(context.Context, llm.Request) (llm.Response, error) {
+	return llm.Response{}, fmt.Errorf("stub-llm: no impl wired yet")
 }
 
 func newSpecCmd() *cobra.Command {

@@ -1,16 +1,15 @@
 # golangci-lint configuration for mykb-curator.
 #
-# Conservative defaults — we add linters as the codebase grows. The
-# goal is "block obvious mistakes, don't argue about style."
-
-version: "2"
+# v1 format (pinned to golangci-lint v1.x in CI). Conservative
+# starter set — we add linters as the codebase grows. The goal is
+# "block obvious mistakes, don't argue about style."
 
 run:
   timeout: 5m
   go: "1.23"
 
 linters:
-  default: none
+  disable-all: true
   enable:
     - errcheck
     - govet

@@ -13,18 +13,18 @@ import (
 
 // Config is the parsed per-wiki configuration.
 type Config struct {
-	Wiki        string         `yaml:"wiki"`
-	KBSource    KBSourceConfig `yaml:"kb_source"`
-	SpecStore   SpecStoreConfig `yaml:"spec_store"`
-	WikiTarget  WikiTargetConfig `yaml:"wiki_target"`
+	Wiki        string            `yaml:"wiki"`
+	KBSource    KBSourceConfig    `yaml:"kb_source"`
+	SpecStore   SpecStoreConfig   `yaml:"spec_store"`
+	WikiTarget  WikiTargetConfig  `yaml:"wiki_target"`
 	KBWriteback KBWritebackConfig `yaml:"kb_writeback"`
-	LLM         LLMConfig      `yaml:"llm"`
-	CacheDir    string         `yaml:"cache_dir"`
+	LLM         LLMConfig         `yaml:"llm"`
+	CacheDir    string            `yaml:"cache_dir"`
 }
 
 type KBSourceConfig struct {
-	Type     string `yaml:"type"`     // git | local | daemon
-	Repo     string `yaml:"repo"`     // git URL or local path
+	Type     string `yaml:"type"` // git | local | daemon
+	Repo     string `yaml:"repo"` // git URL or local path
 	Branch   string `yaml:"branch"`
 	ReadOnly bool   `yaml:"read_only"`
 }
@@ -42,13 +42,13 @@ type WikiTargetConfig struct {
 }
 
 type WikiAuthConfig struct {
-	Type        string `yaml:"type"`         // bot-password | api-token
+	Type        string `yaml:"type"` // bot-password | api-token
 	User        string `yaml:"user"`
 	PasswordEnv string `yaml:"password_env"` // env var name; secret resolved at run time
 }
 
 type KBWritebackConfig struct {
-	Type         string `yaml:"type"`           // github-pr | gitlab-mr | none
+	Type         string `yaml:"type"` // github-pr | gitlab-mr | none
 	Repo         string `yaml:"repo"`
 	BaseBranch   string `yaml:"base_branch"`
 	BranchPrefix string `yaml:"branch_prefix"`

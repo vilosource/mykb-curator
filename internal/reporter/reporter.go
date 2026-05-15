@@ -12,15 +12,15 @@ import (
 
 // Report is the structured record of one curator run.
 type Report struct {
-	RunID      string
-	Wiki       string
-	StartedAt  time.Time
-	EndedAt    time.Time
-	KBCommit   string
-	Specs      []SpecResult
-	Errors     []string
-	Warnings   []string
-	Metrics    Metrics
+	RunID     string
+	Wiki      string
+	StartedAt time.Time
+	EndedAt   time.Time
+	KBCommit  string
+	Specs     []SpecResult
+	Errors    []string
+	Warnings  []string
+	Metrics   Metrics
 }
 
 // SpecResult records what happened to one spec during the run.

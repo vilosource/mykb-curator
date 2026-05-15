@@ -43,8 +43,8 @@ type Target interface {
 
 // Page is a wiki page snapshot.
 type Page struct {
-	Title         string
-	Content       string
+	Title          string
+	Content        string
 	LatestRevision Revision
 }
 

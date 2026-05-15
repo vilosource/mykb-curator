@@ -78,8 +78,8 @@ type ProseBlock struct {
 	Prov Provenance
 }
 
-func (ProseBlock) Kind() string { return "prose" }
-func (ProseBlock) Zone() Zone   { return ZoneEditorial }
+func (ProseBlock) Kind() string             { return "prose" }
+func (ProseBlock) Zone() Zone               { return ZoneEditorial }
 func (b ProseBlock) Provenance() Provenance { return b.Prov }
 
 // MachineBlock is auto-generated structural content — always
@@ -91,8 +91,8 @@ type MachineBlock struct {
 	Prov    Provenance
 }
 
-func (MachineBlock) Kind() string { return "machine" }
-func (MachineBlock) Zone() Zone   { return ZoneMachine }
+func (MachineBlock) Kind() string             { return "machine" }
+func (MachineBlock) Zone() Zone               { return ZoneMachine }
 func (b MachineBlock) Provenance() Provenance { return b.Prov }
 
 // KBRefBlock references a specific kb entry. Resolved by the
@@ -104,8 +104,8 @@ type KBRefBlock struct {
 	Prov Provenance
 }
 
-func (KBRefBlock) Kind() string { return "kbref" }
-func (KBRefBlock) Zone() Zone   { return ZoneMachine }
+func (KBRefBlock) Kind() string             { return "kbref" }
+func (KBRefBlock) Zone() Zone               { return ZoneMachine }
 func (b KBRefBlock) Provenance() Provenance { return b.Prov }
 
 // TableBlock is a structured table generated from a kb query.
@@ -115,31 +115,31 @@ type TableBlock struct {
 	Prov    Provenance
 }
 
-func (TableBlock) Kind() string { return "table" }
-func (TableBlock) Zone() Zone   { return ZoneMachine }
+func (TableBlock) Kind() string             { return "table" }
+func (TableBlock) Zone() Zone               { return ZoneMachine }
 func (b TableBlock) Provenance() Provenance { return b.Prov }
 
 // DiagramBlock holds diagram source for rendering by the
 // RenderDiagrams pass. Lang selects the renderer (mermaid is the
 // default; plantuml, drawio handled by escape-hatch paths).
 type DiagramBlock struct {
-	Lang   string // "mermaid" | "plantuml" | "image-ref"
-	Source string
+	Lang     string // "mermaid" | "plantuml" | "image-ref"
+	Source   string
 	AssetRef string // set after RenderDiagrams pass uploads the image
-	Prov    Provenance
+	Prov     Provenance
 }
 
-func (DiagramBlock) Kind() string { return "diagram" }
-func (DiagramBlock) Zone() Zone   { return ZoneMachine }
+func (DiagramBlock) Kind() string             { return "diagram" }
+func (DiagramBlock) Zone() Zone               { return ZoneMachine }
 func (b DiagramBlock) Provenance() Provenance { return b.Prov }
 
 // Callout is a note/warning/info box. Zone depends on origin: LLM
 // prose is editorial; spec-fixed text is machine.
 type Callout struct {
-	Severity string // "note" | "warning" | "info"
-	Body     string
+	Severity  string // "note" | "warning" | "info"
+	Body      string
 	IsMachine bool
-	Prov     Provenance
+	Prov      Provenance
 }
 
 func (Callout) Kind() string { return "callout" }
@@ -160,6 +160,6 @@ type EscapeHatch struct {
 	Prov    Provenance
 }
 
-func (EscapeHatch) Kind() string { return "escape-hatch" }
-func (EscapeHatch) Zone() Zone   { return ZoneMachine }
+func (EscapeHatch) Kind() string             { return "escape-hatch" }
+func (EscapeHatch) Zone() Zone               { return ZoneMachine }
 func (b EscapeHatch) Provenance() Provenance { return b.Prov }

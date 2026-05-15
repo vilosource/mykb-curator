@@ -15,9 +15,9 @@ var (
 
 func TestBlockZone_DefaultsAreCorrect(t *testing.T) {
 	cases := []struct {
-		name string
+		name  string
 		block Block
-		want Zone
+		want  Zone
 	}{
 		{"prose is editorial", ProseBlock{}, ZoneEditorial},
 		{"machine is machine", MachineBlock{}, ZoneMachine},

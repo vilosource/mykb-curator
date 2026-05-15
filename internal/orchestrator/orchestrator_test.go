@@ -13,7 +13,10 @@ import (
 )
 
 // fakeKB returns a fixed snapshot.
-type fakeKB struct{ commit string; err error }
+type fakeKB struct {
+	commit string
+	err    error
+}
 
 func (f fakeKB) Pull(ctx context.Context) (kb.Snapshot, error) {
 	if f.err != nil {
@@ -24,7 +27,10 @@ func (f fakeKB) Pull(ctx context.Context) (kb.Snapshot, error) {
 func (fakeKB) Whoami() string { return "fakeKB" }
 
 // fakeSpecs returns a fixed slice.
-type fakeSpecs struct{ items []specs.Spec; err error }
+type fakeSpecs struct {
+	items []specs.Spec
+	err   error
+}
 
 func (f fakeSpecs) Pull(ctx context.Context) ([]specs.Spec, error) {
 	return f.items, f.err
@@ -35,7 +41,7 @@ func (fakeSpecs) Whoami() string { return "fakeSpecs" }
 // Provided so the orchestrator can be constructed.
 type fakeWiki struct{}
 
-func (fakeWiki) Whoami(ctx context.Context) (string, error) { return "User:Fake", nil }
+func (fakeWiki) Whoami(ctx context.Context) (string, error)                { return "User:Fake", nil }
 func (fakeWiki) GetPage(ctx context.Context, _ string) (*wiki.Page, error) { return nil, nil }
 func (fakeWiki) UpsertPage(ctx context.Context, _, _, _ string) (wiki.Revision, error) {
 	return wiki.Revision{}, nil
@@ -54,8 +60,8 @@ func (fakeLLM) Complete(ctx context.Context, _ llm.Request) (llm.Response, error
 
 func TestRun_HappyPath_RecordsAllSpecsAsSkipped(t *testing.T) {
 	o := New(Deps{
-		Wiki:  "acme",
-		KB:    fakeKB{commit: "abc123"},
+		Wiki: "acme",
+		KB:   fakeKB{commit: "abc123"},
 		Specs: fakeSpecs{items: []specs.Spec{
 			{ID: "page-a", Wiki: "acme", Page: "PageA", Kind: "projection"},
 			{ID: "page-b", Wiki: "acme", Page: "PageB", Kind: "editorial"},
@@ -83,8 +89,8 @@ func TestRun_HappyPath_RecordsAllSpecsAsSkipped(t *testing.T) {
 
 func TestRun_WikiMismatch_FailsSpec(t *testing.T) {
 	o := New(Deps{
-		Wiki:  "acme",
-		KB:    fakeKB{commit: "abc"},
+		Wiki: "acme",
+		KB:   fakeKB{commit: "abc"},
 		Specs: fakeSpecs{items: []specs.Spec{
 			{ID: "bad", Wiki: "widgetco", Page: "X"},
 		}},

@@ -35,7 +35,7 @@ func (inMemKB) Whoami() string { return "in-memory" }
 type inMemSpecs struct{ items []specs.Spec }
 
 func (s inMemSpecs) Pull(context.Context) ([]specs.Spec, error) { return s.items, nil }
-func (inMemSpecs) Whoami() string                                 { return "in-memory" }
+func (inMemSpecs) Whoami() string                               { return "in-memory" }
 
 type inMemWiki struct{}
 
