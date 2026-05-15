@@ -274,4 +274,3 @@ func decodeRevision(rev any) wiki.Revision {
 		IsBot:     isBot,
 	}
 }
-
