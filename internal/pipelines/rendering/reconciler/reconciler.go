@@ -43,6 +43,15 @@ type Decision struct {
 	// last-seen state was.
 	CurrentRevisionID string
 
+	// MergedContent is the final content to push to the wiki — the
+	// block-level merge of the existing wiki page and the new render
+	// (editorial blocks with matching provenance keep their wiki
+	// body; machine blocks always use the new render).
+	//
+	// Empty for ActionNoOp (no push). For ActionCreate it's just the
+	// new render verbatim.
+	MergedContent string
+
 	// HumanEdits is the list of human edits detected since the last
 	// curator write to this page. Empty for new pages, for bot-only
 	// histories, or when no human edit was made.
@@ -84,15 +93,25 @@ func (r *Reconciler) Reconcile(ctx context.Context, title string, rendered []byt
 		return Decision{}, fmt.Errorf("reconciler: get page %q: %w", title, err)
 	}
 
-	// Case 1: page doesn't exist on the wiki → create.
+	// Case 1: page doesn't exist on the wiki → create with new render verbatim.
 	if current == nil {
-		return Decision{Action: ActionCreate}, nil
+		return Decision{Action: ActionCreate, MergedContent: string(rendered)}, nil
 	}
 
-	d := Decision{CurrentRevisionID: current.LatestRevision.ID}
+	// Compute the block-level merged content. For editorial blocks
+	// with matching provenance hashes the wiki body wins (human
+	// polish survives); machine blocks always use the new render.
+	merged := MergeBlocks([]byte(current.Content), rendered)
 
-	// Case 2: content matches → no-op.
-	if string(rendered) == current.Content {
+	d := Decision{
+		CurrentRevisionID: current.LatestRevision.ID,
+		MergedContent:     merged,
+	}
+
+	// Case 2: merged content matches current wiki content → no-op.
+	// (Either nothing changed or every editorial block was preserved
+	// and machine blocks happen to be identical to what's already there.)
+	if merged == current.Content {
 		d.Action = ActionNoOp
 		return d, nil
 	}

@@ -2,6 +2,7 @@ package mediawiki
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -85,6 +86,21 @@ func (m *fakeMW) serve(w http.ResponseWriter, r *http.Request) {
 		m.pages[title] = text
 		m.revCount++
 		fmt.Fprintf(w, `{"edit":{"result":"Success","pageid":1,"title":%q,"newrevid":%d}}`, title, m.revCount)
+	case "parse":
+		page := firstNonEmpty(r.PostForm.Get("page"), r.URL.Query().Get("page"))
+		content, ok := m.pages[page]
+		if !ok {
+			fmt.Fprintf(w, `{"error":{"code":"missingtitle","info":"page %s does not exist"}}`, page)
+			return
+		}
+		jb, _ := json.Marshal(content)
+		fv := firstNonEmpty(r.PostForm.Get("formatversion"), r.URL.Query().Get("formatversion"))
+		if fv == "2" {
+			// formatversion=2: wikitext is a plain string.
+			fmt.Fprintf(w, `{"parse":{"title":%q,"pageid":1,"wikitext":%s}}`, page, jb)
+		} else {
+			fmt.Fprintf(w, `{"parse":{"title":%q,"pageid":1,"wikitext":{"*":%s}}}`, page, jb)
+		}
 	default:
 		// Unknown action — return an api error shape go-mwclient understands.
 		fmt.Fprintf(w, `{"error":{"code":"unknown-action","info":"unsupported action: %s"}}`, action)

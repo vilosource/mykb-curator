@@ -16,6 +16,7 @@ package mediawiki
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -109,46 +110,49 @@ func (t *Target) Whoami(_ context.Context) (string, error) {
 
 // GetPage fetches the current state of a page. Returns nil if the
 // page does not exist (not an error).
+//
+// Uses action=parse&prop=wikitext&formatversion=2. We bypass
+// go-mwclient's jason-based decoding here because the v1 response
+// shape has a "*" key (`wikitext.*`) that jason can't navigate.
+// formatversion=2 returns wikitext as a plain string and we
+// decode with encoding/json directly via GetRaw.
 func (t *Target) GetPage(ctx context.Context, title string) (*wiki.Page, error) {
 	if err := t.ensureAuth(ctx); err != nil {
 		return nil, fmt.Errorf("mediawiki: auth: %w", err)
 	}
-	resp, err := t.client.Get(params.Values{
-		"action":  "query",
-		"prop":    "revisions",
-		"titles":  title,
-		"rvprop":  "ids|user|timestamp|comment|content|flags",
-		"rvslots": "main",
+	raw, err := t.client.GetRaw(params.Values{
+		"action":        "parse",
+		"page":          title,
+		"prop":          "wikitext",
+		"formatversion": "2",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("mediawiki: get page: %w", err)
 	}
-	pagesObj, err := resp.GetObject("query", "pages")
-	if err != nil {
-		return nil, nil
+	var resp struct {
+		Parse struct {
+			Title    string `json:"title"`
+			PageID   int    `json:"pageid"`
+			Wikitext string `json:"wikitext"`
+		} `json:"parse"`
+		Error *struct {
+			Code string `json:"code"`
+			Info string `json:"info"`
+		} `json:"error,omitempty"`
 	}
-	for _, raw := range pagesObj.Map() {
-		page, err := raw.Object()
-		if err != nil {
-			continue
-		}
-		if _, missing := page.Map()["missing"]; missing {
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("mediawiki: decode parse response: %w; body=%s", err, raw)
+	}
+	if resp.Error != nil {
+		if resp.Error.Code == "missingtitle" {
 			return nil, nil
 		}
-		revs, err := page.GetObjectArray("revisions")
-		if err != nil || len(revs) == 0 {
-			return nil, nil
-		}
-		rev := revs[0]
-		latest := decodeRevision(rev)
-		content := decodeContent(rev)
-		return &wiki.Page{
-			Title:          title,
-			Content:        content,
-			LatestRevision: latest,
-		}, nil
+		return nil, fmt.Errorf("mediawiki: parse error %s: %s", resp.Error.Code, resp.Error.Info)
 	}
-	return nil, nil
+	return &wiki.Page{
+		Title:   title,
+		Content: resp.Parse.Wikitext,
+	}, nil
 }
 
 // UpsertPage creates or updates a page. bot=true is set so the

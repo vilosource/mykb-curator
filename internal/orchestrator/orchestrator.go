@@ -355,7 +355,14 @@ func (o *Orchestrator) reconcileAndPush(ctx context.Context, s specs.Spec, rende
 		return res, nil
 	case reconciler.ActionCreate, reconciler.ActionUpsert:
 		summary := fmt.Sprintf("mykb-curator: spec=%s", s.ID)
-		rev, err := o.deps.WikiTarget.UpsertPage(ctx, s.Page, string(rendered), summary)
+		// Use the reconciler's merged content (which preserves human
+		// polish on editorial blocks) rather than the raw new render.
+		// For ActionCreate the merge is just the new render verbatim.
+		content := dec.MergedContent
+		if content == "" {
+			content = string(rendered)
+		}
+		rev, err := o.deps.WikiTarget.UpsertPage(ctx, s.Page, content, summary)
 		if err != nil {
 			return pushResult{}, fmt.Errorf("upsert %q: %w", s.Page, err)
 		}

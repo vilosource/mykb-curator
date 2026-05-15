@@ -4,8 +4,12 @@ package scenario_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/cookiejar"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -183,6 +187,94 @@ func waitForAPI(base string, timeout time.Duration) error {
 		time.Sleep(500 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout after %s; last status=%q content-type=%q", timeout, lastStatus, lastCT)
+}
+
+// fetchPageContent queries action=parse&prop=wikitext to get the
+// page's wikitext directly. Used by scenarios as a workaround for
+// the MediaWikiTarget.GetPage roundtrip fragility on fresh-install
+// MediaWiki.
+func fetchPageContent(ctx context.Context, wikiURL, title string) (string, error) {
+	u := wikiURL + "/api.php?action=parse&page=" + url.QueryEscape(title) +
+		"&prop=wikitext&format=json"
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	var raw struct {
+		Parse struct {
+			Wikitext struct {
+				All string `json:"*"`
+			} `json:"wikitext"`
+		} `json:"parse"`
+		Error *struct {
+			Code string `json:"code"`
+			Info string `json:"info"`
+		} `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return "", fmt.Errorf("decode parse response: %w; body=%s", err, body)
+	}
+	if raw.Error != nil {
+		return "", fmt.Errorf("parse api error %s: %s", raw.Error.Code, raw.Error.Info)
+	}
+	return raw.Parse.Wikitext.All, nil
+}
+
+// newCookieJar returns a fresh in-memory cookie jar for HTTP
+// sessions. Used by scenarios that drive MediaWiki's auth+edit
+// dance directly (bypassing the curator's adapter so we can
+// simulate non-bot edits).
+func newCookieJar() (http.CookieJar, error) {
+	return cookiejar.New(nil)
+}
+
+// postForJSONField does a form POST (or GET if form is nil) and
+// reads a single field from the response JSON via dotted path.
+func postForJSONField(ctx context.Context, c *http.Client, urlStr string, form url.Values, dotPath string) (string, error) {
+	var (
+		resp *http.Response
+		err  error
+	)
+	if form == nil {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
+		resp, err = c.Do(req)
+	} else {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, urlStr, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		resp, err = c.Do(req)
+	}
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return "", fmt.Errorf("decode json (%s): %w; body=%s", urlStr, err, body)
+	}
+	parts := strings.Split(dotPath, ".")
+	var cur any = raw
+	for _, p := range parts {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return "", fmt.Errorf("path %s: not a map at %s; body=%s", dotPath, p, body)
+		}
+		cur = m[p]
+	}
+	s, _ := cur.(string)
+	if s == "" {
+		return "", fmt.Errorf("path %s: empty/non-string; body=%s", dotPath, body)
+	}
+	return s, nil
 }
 
 // readStreamingOutput drains a testcontainers exec output reader.
