@@ -46,7 +46,15 @@ type Deps struct {
 
 	// Passes runs after each Frontend.Build, transforming the IR
 	// (e.g., ApplyZoneMarkers). Empty pipeline = no transformation.
+	// Mutually exclusive with BuildPasses; if both are set,
+	// BuildPasses wins.
 	Passes *passes.Pipeline
+
+	// BuildPasses constructs a per-run pipeline using the kb snapshot
+	// the orchestrator just pulled. Used by passes that close over
+	// the snapshot (e.g., ResolveKBRefs). When nil, Passes is used
+	// directly; when set, called once per Run, after kb.Pull.
+	BuildPasses func(snap kb.Snapshot) *passes.Pipeline
 
 	// Backend renders the final IR to the target format. Required
 	// when Frontends is set.
@@ -100,6 +108,14 @@ func (o *Orchestrator) Run(ctx context.Context) (reporter.Report, error) {
 		return rb.Build(), err
 	}
 
+	// Resolve the pass pipeline for this run: BuildPasses overrides
+	// the static Passes if set, so per-run-bound passes (e.g.,
+	// ResolveKBRefs that closes over the snapshot) work transparently.
+	passPipeline := o.deps.Passes
+	if o.deps.BuildPasses != nil {
+		passPipeline = o.deps.BuildPasses(snap)
+	}
+
 	for _, s := range specList {
 		if err := validateSpecForWiki(s, o.deps.Wiki); err != nil {
 			rb.AddSpecResult(reporter.SpecResult{
@@ -110,7 +126,7 @@ func (o *Orchestrator) Run(ctx context.Context) (reporter.Report, error) {
 			continue
 		}
 
-		rb.AddSpecResult(o.processSpec(ctx, s, snap))
+		rb.AddSpecResult(o.processSpec(ctx, s, snap, passPipeline))
 	}
 
 	return rb.Build(), nil
@@ -121,7 +137,7 @@ func (o *Orchestrator) Run(ctx context.Context) (reporter.Report, error) {
 // (no Frontends registry), the spec is recorded as Skipped — the
 // v0.0 walking-skeleton behaviour, preserved so partial deployments
 // still produce useful run reports.
-func (o *Orchestrator) processSpec(ctx context.Context, s specs.Spec, snap kb.Snapshot) reporter.SpecResult {
+func (o *Orchestrator) processSpec(ctx context.Context, s specs.Spec, snap kb.Snapshot, passPipeline *passes.Pipeline) reporter.SpecResult {
 	if o.deps.Frontends == nil {
 		return reporter.SpecResult{
 			ID:     s.ID,
@@ -140,8 +156,8 @@ func (o *Orchestrator) processSpec(ctx context.Context, s specs.Spec, snap kb.Sn
 		return reporter.SpecResult{ID: s.ID, Status: reporter.StatusFailed, Reason: fmt.Errorf("frontend %s: %w", frontend.Name(), err).Error()}
 	}
 
-	if o.deps.Passes != nil {
-		doc, err = o.deps.Passes.Apply(ctx, doc)
+	if passPipeline != nil {
+		doc, err = passPipeline.Apply(ctx, doc)
 		if err != nil {
 			return reporter.SpecResult{ID: s.ID, Status: reporter.StatusFailed, Reason: err.Error()}
 		}

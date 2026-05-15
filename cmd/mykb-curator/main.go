@@ -37,6 +37,8 @@ import (
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/projection"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes/resolvekbrefs"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes/validatelinks"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes/zonemarkers"
 	"github.com/vilosource/mykb-curator/internal/reporter"
 )
@@ -113,7 +115,10 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 	frontendRegistry := frontends.NewRegistry()
 	frontendRegistry.Register(projection.New())
 
-	passPipeline := passes.NewPipeline(zonemarkers.New())
+	// Pass pipeline is per-run because ResolveKBRefs closes over the
+	// kb snapshot. ValidateLinks's known-pages map is built from the
+	// loaded specs (every spec.Page is a known target).
+	buildPasses := composePassPipeline(specStore)
 
 	onRendered := composeOnRenderedSink(ctx, cfg, wikiTarget, outDir)
 
@@ -126,16 +131,16 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 	}
 
 	orch := orchestrator.New(orchestrator.Deps{
-		Wiki:       cfg.Wiki,
-		KB:         kbSrc,
-		Specs:      specStore,
-		WikiTarget: wikiTarget,
-		LLM:        stubLLM{},
-		Frontends:  frontendRegistry,
-		Passes:     passPipeline,
-		Backend:    markdown.New(),
-		OnRendered: onRendered,
-		RunState:   cache,
+		Wiki:        cfg.Wiki,
+		KB:          kbSrc,
+		Specs:       specStore,
+		WikiTarget:  wikiTarget,
+		LLM:         stubLLM{},
+		Frontends:   frontendRegistry,
+		BuildPasses: buildPasses,
+		Backend:     markdown.New(),
+		OnRendered:  onRendered,
+		RunState:    cache,
 	})
 
 	report, err := orch.Run(ctx)
@@ -211,6 +216,45 @@ func makeWikiUpsertSink(ctx context.Context, target wikipkg.Target) func(string,
 		_, err := target.UpsertPage(ctx, title, string(rendered), summary)
 		return err
 	}
+}
+
+// composePassPipeline builds the per-run pass pipeline. Returns a
+// function (not a Pipeline directly) because some passes need the
+// kb snapshot — captured by the orchestrator at run-time.
+//
+// Default pipeline: ResolveKBRefs → ApplyZoneMarkers → ValidateLinks.
+// Order matters: ResolveKBRefs replaces KBRefBlocks with ProseBlocks
+// so ApplyZoneMarkers sees a clean block list, and ValidateLinks
+// runs last so it catches links in resolved content too.
+func composePassPipeline(specStore specs.Store) func(kbpkg.Snapshot) *passes.Pipeline {
+	return func(snap kbpkg.Snapshot) *passes.Pipeline {
+		// Build known-pages map from the loaded specs. Best-effort:
+		// any pull failure leaves the map empty, which ValidateLinks
+		// will treat as "all links broken" — safe-fail behaviour.
+		known := buildKnownPages(specStore)
+		return passes.NewPipeline(
+			resolvekbrefs.New(snap),
+			zonemarkers.New(),
+			validatelinks.New(known),
+		)
+	}
+}
+
+// buildKnownPages collects spec.Page values from the spec store into
+// a set. Best-effort — errors here don't fail composition; they
+// degrade ValidateLinks to conservative-mode (fails on every link).
+func buildKnownPages(store specs.Store) map[string]bool {
+	out := map[string]bool{}
+	list, err := store.Pull(context.Background())
+	if err != nil {
+		return out
+	}
+	for _, s := range list {
+		if s.Page != "" {
+			out[s.Page] = true
+		}
+	}
+	return out
 }
 
 // composeRunStateCache opens the per-wiki bbolt cache. Returns a
