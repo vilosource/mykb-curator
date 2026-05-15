@@ -163,3 +163,30 @@ type EscapeHatch struct {
 func (EscapeHatch) Kind() string             { return "escape-hatch" }
 func (EscapeHatch) Zone() Zone               { return ZoneMachine }
 func (b EscapeHatch) Provenance() Provenance { return b.Prov }
+
+// MarkerPosition indicates whether a MarkerBlock opens or closes a
+// machine-owned region.
+type MarkerPosition int
+
+const (
+	MarkerBegin MarkerPosition = iota
+	MarkerEnd
+)
+
+// MarkerBlock is the IR representation of a zone-region boundary.
+// Produced by the ApplyZoneMarkers pass; rendered by each backend
+// using format-appropriate syntax (HTML comments for markdown /
+// wikitext / Confluence; future backends may differ).
+//
+// Owning the marker as an IR-level block (instead of having backends
+// emit markers themselves) means the marker convention is set in one
+// place (the pass) and every backend renders mechanically.
+type MarkerBlock struct {
+	Position MarkerPosition
+	BlockID  string // matches the MachineBlock the marker brackets
+	Prov     Provenance
+}
+
+func (MarkerBlock) Kind() string             { return "marker" }
+func (MarkerBlock) Zone() Zone               { return ZoneMachine }
+func (b MarkerBlock) Provenance() Provenance { return b.Prov }

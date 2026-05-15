@@ -83,7 +83,12 @@ func TestRender_ProseBlock_IsParagraph(t *testing.T) {
 	}
 }
 
-func TestRender_MachineBlock_WrappedInCuratorMarkers(t *testing.T) {
+func TestRender_MachineBlock_BodyOnly_NoInlineMarkers(t *testing.T) {
+	// Per the refactor: backends render IR mechanically. Markers come
+	// from MarkerBlock (produced by the ApplyZoneMarkers pass), NOT
+	// from inline emission inside MachineBlock rendering. Asserting
+	// no marker text in output of a MachineBlock alone proves the
+	// separation of concerns.
 	doc := ir.Document{
 		Sections: []ir.Section{{
 			Heading: "Resource Groups",
@@ -99,17 +104,38 @@ func TestRender_MachineBlock_WrappedInCuratorMarkers(t *testing.T) {
 	}
 	out, _ := New().Render(doc)
 	s := string(out)
-	if !strings.Contains(s, "<!-- CURATOR:BEGIN block=rg-table") {
-		t.Errorf("missing BEGIN marker:\n%s", s)
+	if strings.Contains(s, "CURATOR:BEGIN") {
+		t.Errorf("backend must NOT emit BEGIN marker on its own (responsibility moved to ApplyZoneMarkers pass):\n%s", s)
 	}
-	if !strings.Contains(s, "<!-- CURATOR:END block=rg-table -->") {
-		t.Errorf("missing END marker:\n%s", s)
-	}
-	if !strings.Contains(s, "provenance=abc123") {
-		t.Errorf("missing provenance hash in marker:\n%s", s)
+	if strings.Contains(s, "CURATOR:END") {
+		t.Errorf("backend must NOT emit END marker on its own:\n%s", s)
 	}
 	if !strings.Contains(s, "table body here") {
-		t.Errorf("missing block body:\n%s", s)
+		t.Errorf("missing block body (backend should still render body):\n%s", s)
+	}
+}
+
+func TestRender_MarkerBlock_RendersAsHTMLComment(t *testing.T) {
+	doc := ir.Document{
+		Sections: []ir.Section{{
+			Heading: "Resource Groups",
+			Blocks: []ir.Block{
+				ir.MarkerBlock{Position: ir.MarkerBegin, BlockID: "rg-table", Prov: ir.Provenance{InputHash: "abc123"}},
+				ir.MachineBlock{BlockID: "rg-table", Body: "table body", Prov: ir.Provenance{InputHash: "abc123"}},
+				ir.MarkerBlock{Position: ir.MarkerEnd, BlockID: "rg-table", Prov: ir.Provenance{InputHash: "abc123"}},
+			},
+		}},
+	}
+	out, _ := New().Render(doc)
+	s := string(out)
+	if !strings.Contains(s, "<!-- CURATOR:BEGIN block=rg-table provenance=abc123 -->") {
+		t.Errorf("missing BEGIN marker rendering:\n%s", s)
+	}
+	if !strings.Contains(s, "<!-- CURATOR:END block=rg-table -->") {
+		t.Errorf("missing END marker rendering:\n%s", s)
+	}
+	if !strings.Contains(s, "table body") {
+		t.Errorf("missing machine block body:\n%s", s)
 	}
 }
 
@@ -291,13 +317,25 @@ func sampleDoc() ir.Document {
 				},
 			},
 			{
+				// Post-ApplyZoneMarkers shape: machine block wrapped
+				// in begin/end MarkerBlocks.
 				Heading: "Resource Groups",
 				Blocks: []ir.Block{
+					ir.MarkerBlock{
+						Position: ir.MarkerBegin,
+						BlockID:  "rg-table",
+						Prov:     ir.Provenance{InputHash: "h1"},
+					},
 					ir.MachineBlock{
 						BlockID: "rg-table",
 						Kind_:   "rg-table",
 						Body:    "| rg-vault-prod | swedencentral | shared |",
 						Prov:    ir.Provenance{Sources: []string{"area/infra-azure"}, InputHash: "h1"},
+					},
+					ir.MarkerBlock{
+						Position: ir.MarkerEnd,
+						BlockID:  "rg-table",
+						Prov:     ir.Provenance{InputHash: "h1"},
 					},
 				},
 			},

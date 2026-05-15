@@ -95,6 +95,8 @@ func writeBlock(buf *bytes.Buffer, blk ir.Block) {
 		buf.WriteByte('\n')
 	case ir.MachineBlock:
 		writeMachineBlock(buf, b)
+	case ir.MarkerBlock:
+		writeMarkerBlock(buf, b)
 	case ir.KBRefBlock:
 		writeKBRef(buf, b)
 	case ir.TableBlock:
@@ -112,11 +114,25 @@ func writeBlock(buf *bytes.Buffer, blk ir.Block) {
 	}
 }
 
+// writeMachineBlock renders the body of a machine-owned block only.
+// Markers around the block come from MarkerBlock siblings produced
+// by the ApplyZoneMarkers pass — the backend does not emit marker
+// policy itself, keeping the marker convention centralised.
 func writeMachineBlock(buf *bytes.Buffer, b ir.MachineBlock) {
-	fmt.Fprintf(buf, "<!-- CURATOR:BEGIN block=%s provenance=%s -->\n", b.BlockID, b.Prov.InputHash)
 	buf.WriteString(strings.TrimRight(b.Body, "\n"))
 	buf.WriteByte('\n')
-	fmt.Fprintf(buf, "<!-- CURATOR:END block=%s -->\n", b.BlockID)
+}
+
+// writeMarkerBlock renders a zone-region boundary as an HTML comment.
+// HTML comments are inert in markdown, wikitext, and Confluence
+// storage format, so the same syntax works across all three.
+func writeMarkerBlock(buf *bytes.Buffer, b ir.MarkerBlock) {
+	switch b.Position {
+	case ir.MarkerBegin:
+		fmt.Fprintf(buf, "<!-- CURATOR:BEGIN block=%s provenance=%s -->\n", b.BlockID, b.Prov.InputHash)
+	case ir.MarkerEnd:
+		fmt.Fprintf(buf, "<!-- CURATOR:END block=%s -->\n", b.BlockID)
+	}
 }
 
 func writeKBRef(buf *bytes.Buffer, b ir.KBRefBlock) {

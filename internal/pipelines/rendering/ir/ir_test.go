@@ -11,6 +11,7 @@ var (
 	_ Block = DiagramBlock{}
 	_ Block = Callout{}
 	_ Block = EscapeHatch{}
+	_ Block = MarkerBlock{}
 )
 
 func TestBlockZone_DefaultsAreCorrect(t *testing.T) {
@@ -27,6 +28,8 @@ func TestBlockZone_DefaultsAreCorrect(t *testing.T) {
 		{"callout-machine is machine", Callout{IsMachine: true}, ZoneMachine},
 		{"callout-editorial is editorial", Callout{IsMachine: false}, ZoneEditorial},
 		{"escape-hatch is machine", EscapeHatch{}, ZoneMachine},
+		{"marker-begin is machine", MarkerBlock{Position: MarkerBegin}, ZoneMachine},
+		{"marker-end is machine", MarkerBlock{Position: MarkerEnd}, ZoneMachine},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -42,11 +45,18 @@ func TestBlockKind_Distinct(t *testing.T) {
 	for _, b := range []Block{
 		ProseBlock{}, MachineBlock{}, KBRefBlock{},
 		TableBlock{}, DiagramBlock{}, Callout{}, EscapeHatch{},
+		MarkerBlock{Position: MarkerBegin},
 	} {
 		k := b.Kind()
 		if kinds[k] {
 			t.Errorf("duplicate kind: %s", k)
 		}
 		kinds[k] = true
+	}
+}
+
+func TestMarkerBlock_PositionsDistinct(t *testing.T) {
+	if MarkerBegin == MarkerEnd {
+		t.Errorf("MarkerBegin and MarkerEnd must be distinct sentinel values")
 	}
 }
