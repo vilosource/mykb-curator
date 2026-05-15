@@ -123,13 +123,7 @@ func (r Report) toYAML() reportYAML {
 			BlocksRegenerated: s.BlocksRegenerated,
 		}
 		for _, e := range s.HumanEdits {
-			sy.HumanEdits = append(sy.HumanEdits, humanEditYAML{
-				BlockID:     e.BlockID,
-				Action:      e.Action,
-				Diff:        e.Diff,
-				Explanation: e.Explanation,
-				Suggestion:  e.Suggestion,
-			})
+			sy.HumanEdits = append(sy.HumanEdits, humanEditYAML(e))
 		}
 		out.Specs = append(out.Specs, sy)
 	}

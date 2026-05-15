@@ -1,8 +1,9 @@
 # golangci-lint configuration for mykb-curator.
 #
-# v2 format. Conservative starter linter set — we add linters as the
-# codebase grows. The goal is "block obvious mistakes, don't argue
-# about style."
+# v2 format. Conservative set focused on bugs and dead code rather
+# than style/comment policing — revive's exported-comment-required
+# rules add noise without catching real problems. We rely on code
+# review for style.
 
 version: "2"
 
@@ -18,14 +19,18 @@ linters:
     - staticcheck
     - unused
     - misspell
-    - revive
 
-  exclusions:
-    rules:
-      # Test files: allow long functions and global state for fakes.
-      - path: _test\.go
-        linters:
-          - revive
+  settings:
+    errcheck:
+      # Functions where the unchecked-error pattern is idiomatic.
+      # Listed explicitly so a future surprising case still warns.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (hash.Hash).Write
 
 formatters:
   enable:
