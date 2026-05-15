@@ -14,7 +14,10 @@ It reads specs that declare what each wiki page should be, reads the kb, synthes
 
 Three pluggable backends (KB-source, Spec-store, Wiki-target) wrapped around two pipelines (Page Rendering, KB Maintenance). Each pipeline is compiler-shaped: frontend → IR → passes → backend. Intelligence is localised to the frontend; passes and backends are deterministic and testable. Wikis are soft-read-only — humans can edit; the curator detects drift and surfaces it in a structured run report.
 
-For the full design — principles, C4 diagrams, IR model, two-zone reconciliation, multi-tenancy, roadmap — see [`docs/DESIGN.md`](docs/DESIGN.md).
+## Docs
+
+- [`docs/DESIGN.md`](docs/DESIGN.md) — architecture: principles, C4 diagrams, IR model, two-zone reconciliation, multi-tenancy, roadmap.
+- [`docs/engineering-principles.md`](docs/engineering-principles.md) — engineering north star: SOLID concretized for this codebase, design-pattern map, TDD discipline, four-level testing pyramid up to scenario tests. Non-negotiable for every PR.
 
 ## License
 

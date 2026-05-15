@@ -63,6 +63,8 @@ Two orthogonal pipelines, both driven from the kb, both producing reviewable out
 
 ## 3. Principles & Constraints
 
+> Architectural principles (this section) cover *what* the system is. Engineering principles — SOLID, TDD, the four-level testing pyramid, the design-pattern map — cover *how* it is built. See [`engineering-principles.md`](engineering-principles.md) for the engineering north star; it is non-negotiable for every PR in this repo.
+
 ### 3.1 Architectural principles
 
 1. **mykb is the source of truth.** Wikis are projections. If they disagree, the kb wins (modulo curator-detected human edits, which are reconciled, not silently accepted).
