@@ -1,0 +1,1 @@
+{"id":"harbor-f1","area":"harbor","type":"fact","text":"Harbor v2.0.2 deployed on the swarm","tags":["version"],"zone":"active","provenance":{"status":"verified","source":"helm chart"}}

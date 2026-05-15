@@ -1,0 +1,6 @@
+{
+  "id": "vault",
+  "name": "Vault Architecture",
+  "summary": "Centralised secrets manager — HashiCorp Vault on Raft HA cluster with Azure Key Vault auto-unseal",
+  "tags": ["infra", "secrets"]
+}

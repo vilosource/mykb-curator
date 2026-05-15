@@ -1,0 +1,6 @@
+{
+  "id": "harbor",
+  "name": "Harbor Registry",
+  "summary": "Private container image registry serving CI/CD pipelines",
+  "tags": ["infra", "registry"]
+}

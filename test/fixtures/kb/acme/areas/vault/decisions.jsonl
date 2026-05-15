@@ -1,0 +1,1 @@
+{"id":"vault-d1","area":"vault","type":"decision","text":"VAULT-001: Use Raft over Consul for HA backend","why":"Removes Consul as a hard dependency; Raft is bundled in Vault","rejected":"Consul cluster (operationally heavier)","zone":"active","provenance":{"status":"verified","source":"design doc"}}

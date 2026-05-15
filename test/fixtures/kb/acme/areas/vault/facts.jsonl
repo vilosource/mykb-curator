@@ -1,0 +1,2 @@
+{"id":"vault-f1","area":"vault","type":"fact","text":"Vault runs as an HA Raft cluster with 3 nodes","tags":["ha","raft"],"zone":"active","provenance":{"status":"verified","source":"deployment 2025-11"}}
+{"id":"vault-f2","area":"vault","type":"fact","text":"Auto-unseal uses Azure Key Vault","tags":["azure","unseal"],"zone":"active","provenance":{"status":"verified","source":"config repo"}}

@@ -15,10 +15,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
 	kbpkg "github.com/vilosource/mykb-curator/internal/adapters/kb"
+	kbgit "github.com/vilosource/mykb-curator/internal/adapters/kb/git"
+	kblocal "github.com/vilosource/mykb-curator/internal/adapters/kb/local"
 	"github.com/vilosource/mykb-curator/internal/adapters/specs"
 	"github.com/vilosource/mykb-curator/internal/adapters/specs/localfs"
 	wikipkg "github.com/vilosource/mykb-curator/internal/adapters/wiki"
@@ -85,7 +88,10 @@ func runFromConfig(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	kb := stubKBSource{}
+	kb, err := composeKBSource(cfg)
+	if err != nil {
+		return err
+	}
 	wiki := stubWikiTarget{}
 	llmClient := stubLLM{}
 
@@ -124,18 +130,34 @@ func composeSpecStore(cfg *config.Config) (specs.Store, error) {
 	}
 }
 
-// Stub adapters fill in for the kb / wiki / llm slots until their
-// concrete impls land. They are deliberately minimal: kb returns a
-// hardcoded snapshot so the orchestrator's spec-validation logic
-// can exercise the spec store; wiki and llm are unused in the
-// current run loop (rendering pipeline not yet implemented).
-
-type stubKBSource struct{}
-
-func (stubKBSource) Pull(context.Context) (kbpkg.Snapshot, error) {
-	return kbpkg.Snapshot{Commit: "stub"}, nil
+func composeKBSource(cfg *config.Config) (kbpkg.Source, error) {
+	switch cfg.KBSource.Type {
+	case "local":
+		if cfg.KBSource.Repo == "" {
+			return nil, fmt.Errorf("kb_source.repo: required for type=local (path to the kb directory)")
+		}
+		return kblocal.New(cfg.KBSource.Repo), nil
+	case "git":
+		if cfg.KBSource.Repo == "" {
+			return nil, fmt.Errorf("kb_source.repo: required for type=git (remote URL or local repo path)")
+		}
+		workDir := cfg.CacheDir
+		if workDir == "" {
+			workDir = filepath.Join(os.Getenv("HOME"), ".cache", "mykb-curator", cfg.Wiki, "kb-clone")
+		} else {
+			workDir = filepath.Join(workDir, "kb-clone")
+		}
+		src := kbgit.New(cfg.KBSource.Repo, workDir)
+		if cfg.KBSource.Branch != "" {
+			src = src.WithBranch(cfg.KBSource.Branch)
+		}
+		return src, nil
+	case "daemon":
+		return nil, fmt.Errorf("kb_source.type=daemon: not yet implemented (mykb v2 roadmap)")
+	default:
+		return nil, fmt.Errorf("kb_source.type=%q: unknown (known: local, git)", cfg.KBSource.Type)
+	}
 }
-func (stubKBSource) Whoami() string { return "stub-kb" }
 
 type stubWikiTarget struct{}
 
