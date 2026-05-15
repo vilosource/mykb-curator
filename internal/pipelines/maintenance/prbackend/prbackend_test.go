@@ -141,7 +141,8 @@ func TestSubmit_GroupsByArea(t *testing.T) {
 	h1Idx := strings.Index(body, "h1")
 	v1Idx := strings.Index(body, "v1")
 	v2Idx := strings.Index(body, "v2")
-	if !(harborIdx < h1Idx && h1Idx < vaultIdx && vaultIdx < v1Idx && v1Idx < v2Idx) {
+	ordered := harborIdx < h1Idx && h1Idx < vaultIdx && vaultIdx < v1Idx && v1Idx < v2Idx
+	if !ordered {
 		t.Errorf("PRBody not grouped by area in alphabetical order:\n%s", body)
 	}
 }
