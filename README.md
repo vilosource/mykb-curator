@@ -2,7 +2,9 @@
 
 Maintains human-facing wikis as curated, continuously-updated projections of a [mykb](https://github.com/vilosource/mykb) brain.
 
-**Status:** Design phase — see [`docs/DESIGN.md`](docs/DESIGN.md). No code yet.
+**Status:** v0.0 walking skeleton — design + scaffold landed; rendering pipeline not yet implemented.
+
+**Language:** Go 1.23.
 
 ## What it is
 
@@ -18,6 +20,16 @@ Three pluggable backends (KB-source, Spec-store, Wiki-target) wrapped around two
 
 - [`docs/DESIGN.md`](docs/DESIGN.md) — architecture: principles, C4 diagrams, IR model, two-zone reconciliation, multi-tenancy, roadmap.
 - [`docs/engineering-principles.md`](docs/engineering-principles.md) — engineering north star: SOLID concretized for this codebase, design-pattern map, TDD discipline, four-level testing pyramid up to scenario tests. Non-negotiable for every PR.
+
+## Building
+
+```bash
+make build      # builds bin/mykb-curator and bin/pi-wrapper
+make test       # unit tests (the dev inner loop)
+make test-all   # full pyramid (containers required for integration+)
+```
+
+Requires Go 1.23+. Container-based test levels (integration / scenario) require Docker.
 
 ## License
 

@@ -860,54 +860,70 @@ All credentials referenced from config by env-var name; secrets resolved at run 
 
 ---
 
-## 15. Project Layout (proposed)
+## 15. Project Layout
 
 ```
 mykb-curator/
 ├── README.md
 ├── LICENSE
-├── package.json
-├── tsconfig.json
-├── src/
-│   ├── cli/
-│   │   ├── index.ts             # entry, subcommand dispatch
-│   │   └── commands/            # run, spec, reconcile, report
-│   ├── core/
-│   │   ├── orchestrator.ts
-│   │   ├── lock.ts
-│   │   └── cache.ts
+├── go.mod / go.sum
+├── Makefile
+├── .golangci.yml
+├── cmd/
+│   ├── mykb-curator/            # CLI entrypoint (cobra)
+│   └── pi-wrapper/              # Pi-harness HTTP shim (test fixture)
+├── internal/
+│   ├── config/                  # YAML config loader + schema
+│   ├── orchestrator/            # the run loop
+│   ├── reporter/                # run report assembly
+│   ├── cache/                   # bbolt-backed cache (v0.5)
 │   ├── adapters/
 │   │   ├── kb/                  # Strategy: KB source backends
 │   │   ├── specs/               # Strategy: spec store backends
 │   │   └── wiki/                # Strategy: wiki target backends
 │   ├── pipelines/
 │   │   ├── rendering/
+│   │   │   ├── ir/              # PageDoc types
 │   │   │   ├── frontends/       # projection, editorial, hub, runbook
-│   │   │   ├── ir.ts            # PageDoc types
 │   │   │   ├── passes/          # one file per pass
-│   │   │   ├── backends/        # mediawiki, markdown, confluence, static-html
-│   │   │   └── reconciler.ts
+│   │   │   ├── backends/        # mediawiki, markdown, confluence, static
+│   │   │   └── reconciler/
 │   │   └── maintenance/
 │   │       ├── checks/          # staleness, link-rot, contradiction, research
-│   │       ├── mutation-ir.ts
-│   │       └── pr-backend.ts
-│   ├── llm/                     # cached LLM client
-│   ├── reporter/                # run report assembly
-│   └── config/
-└── tests/
-    ├── fixtures/                # spec + kb + expected IR/output per scenario
-    ├── unit/                    # passes, backends, adapters
-    └── integration/             # end-to-end against fake wiki + fake kb
+│   │       ├── mutation/        # MutationProposal IR
+│   │       └── prbackend/
+│   └── llm/                     # LLM Client interface + impls (anthropic, pi, replay, recording)
+├── test/
+│   ├── integration/             # //go:build integration
+│   ├── contract/                # //go:build contract
+│   ├── scenario/                # //go:build scenario
+│   └── fixtures/                # kb/, specs/, llm/, golden/
+├── deployments/
+│   ├── mediawiki/               # test wiki fixture (Dockerfile + LocalSettings + compose)
+│   └── pi-harness/              # Pi container (Pi + pi-wrapper shim)
+├── .github/workflows/           # ci.yml (PR + push); nightly.yml (scenario)
+└── docs/
+    ├── DESIGN.md
+    └── engineering-principles.md
 ```
 
-Tech choices (proposed):
+Tech choices:
 
-- TypeScript + Node (matches mykb)
-- `mwn` for MediaWiki API
-- `simple-git` for git operations
-- `@anthropic-ai/sdk` for LLM
-- `mermaid-cli` (offline) for diagram rendering
-- `vitest` for unit tests, `bats` for CLI tests (matches mykb)
+| Concern | Choice | Why |
+|---|---|---|
+| Language | Go 1.23 | Single static binary; trivial cross-compile; strong stdlib; testcontainers-go is excellent for the integration story. |
+| CLI | `github.com/spf13/cobra` | Standard Go CLI library; subcommand model fits the curator's surface. |
+| Config | `gopkg.in/yaml.v3` + hand-rolled validation | Tiny dep surface; explicit validation messages. |
+| Cache | `go.etcd.io/bbolt` (v0.5) | Pure-Go embedded B+tree; key-value shape matches `(spec_hash, kb_hash) → IR`; ACID; one file per wiki. |
+| Git | `go-git/go-git` initially; shell-out as fallback | Pure-Go; no system git dep; sufficient for read-mostly use. |
+| MediaWiki client | Evaluate `go-mwclient`; write own thin client if it falls short | API is contained (~800 lines); contract test suite makes either choice safe. |
+| LLM clients | Hand-rolled per provider (anthropic, pi-wrapper); `ReplayClient` and `RecordingClient` decorators | Boundary controlled at the curator; no SDK lock-in. |
+| Diagram rendering | Mermaid (default) via `mmdc` subprocess; pre-rendered images as escape hatch for diagrams mermaid can't express | Curator container ships with `mmdc`; only mermaid is first-class. |
+| Tests — unit / integration / contract | Standard `testing` + `testify`; build tags for level gating | Go-idiomatic; hand-rolled test doubles preferred over generated mocks. |
+| Tests — containers | `testcontainers-go` for MediaWiki + Pi-harness + Gitea (optional) | Programmatic lifecycle; no docker-compose orchestration glue. |
+| Tests — multi-process scenarios | `bats` complements vitest-equivalent Go scenarios | CLI subprocess scenarios where Go testing is awkward. |
+| Lint | `golangci-lint` (errcheck, govet, staticcheck, unused, ineffassign, gofmt, goimports, misspell, revive) | Conservative starter set. |
+| CI | GitHub Actions | Repo lives on GitHub; matrix per pyramid level. |
 
 ---
 

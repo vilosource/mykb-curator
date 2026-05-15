@@ -4,7 +4,7 @@
 
 **Scope:** Every PR, every spec, every implementation in `vilosource/mykb-curator`.
 
-**Upstream:** This document **derives from and is downstream of** the ViloForge canonical north star (`viloforge-platform/docs/engineering-principles.md`). Where the canonical and this document agree, the canonical is authoritative. Where this document concretizes for `mykb-curator` specifically (TypeScript/Node tooling, the curator's component taxonomy, the solo-dev workflow), this document is authoritative for this repo.
+**Upstream:** This document **derives from and is downstream of** the ViloForge canonical north star (`viloforge-platform/docs/engineering-principles.md`). Where the canonical and this document agree, the canonical is authoritative. Where this document concretizes for `mykb-curator` specifically (Go tooling, the curator's component taxonomy, the solo-dev workflow), this document is authoritative for this repo.
 
 **Owner:** lonvilo@pm.me
 
@@ -185,11 +185,11 @@ Four levels, ordered bottom-up. **All four are mandatory** at the levels each ch
 
 **Speed:** < 100ms each. Total unit suite < 30s.
 
-**Run on:** every save (watch mode) + pre-commit + every PR.
+**Run on:** every save (`go test` watcher) + pre-commit + every PR.
 
-**Lives in:** `tests/unit/`.
+**Lives in:** `internal/.../*_test.go` (Go convention: tests sit next to the code they test).
 
-**Vitest config:** default suite; no special pool.
+**Build tag:** none — runs in the default `go test ./...`.
 
 #### Level 2 — Integration tests (fewer, slower)
 
@@ -211,9 +211,9 @@ Four levels, ordered bottom-up. **All four are mandatory** at the levels each ch
 
 **Run on:** every PR commit (CI).
 
-**Lives in:** `tests/integration/`.
+**Lives in:** `test/integration/`.
 
-**Vitest config:** separate test suite with `--testPathPattern=tests/integration`; docker-compose fixtures spun up per suite.
+**Build tag:** `//go:build integration` — opted-in via `make test-integration` (or `go test -tags=integration ./test/integration/...`). Containers managed programmatically by testcontainers-go.
 
 #### Level 3 — Contract tests (between components or against external APIs)
 
@@ -223,8 +223,8 @@ Four levels, ordered bottom-up. **All four are mandatory** at the levels each ch
 
 | Contract test | What's pinned |
 |---|---|
-| **Spec schema contract** | `tests/contract/spec-schema.test.ts` validates every fixture spec in `tests/fixtures/specs/` against the current schema; breaking the schema = mass test failure. |
-| **IR schema contract** | `tests/contract/ir-schema.test.ts` validates IR JSON-dumps; backends consuming IR are tested against the schema so backend-vs-pipeline drift surfaces. |
+| **Spec schema contract** | `test/contract/spec_schema_test.go` validates every fixture spec in `test/fixtures/specs/` against the current schema; breaking the schema = mass test failure. |
+| **IR schema contract** | `test/contract/ir_schema_test.go` validates IR JSON-dumps; backends consuming IR are tested against the schema so backend-vs-pipeline drift surfaces. |
 | **MediaWiki API contract** | Replay-based tests: recorded MediaWiki API responses (per supported version) are replayed against the adapter; if MediaWiki changes its response shape, the recording must be updated and a version-compatibility note added. |
 | **LLM prompt-response contract** | Fixture prompts → fixture responses (cached). Replay against `ReplayLLMClient`. If frontend changes prompts, recordings invalidate and must be regenerated with a real model run + reviewed. |
 | **Wiki backend contract** | Every `WikiTarget` impl runs against the same contract test suite (`WikiTargetContractSuite`); ensures all backends are LSP-substitutable. |
@@ -237,7 +237,7 @@ Four levels, ordered bottom-up. **All four are mandatory** at the levels each ch
 
 **Lives in:** `tests/contract/`.
 
-**Vitest config:** separate suite; contract test runner enumerates all impls of each interface and runs them through a shared spec.
+**Build tag:** `//go:build contract`. Contract suites use `t.Run` subtests to iterate every registered impl through a shared assertions function.
 
 #### Level 4 — Scenario / end-to-end tests (fewest, slowest)
 
@@ -265,7 +265,7 @@ Four levels, ordered bottom-up. **All four are mandatory** at the levels each ch
 
 **Lives in:** `tests/scenario/`.
 
-**Infrastructure:** docker-compose with test MediaWiki + test git server + LLM replay; `bats` for shell-level orchestration of multi-process scenarios; vitest for in-process scenarios.
+**Infrastructure:** testcontainers-go spins up MediaWiki + Pi-harness + (optionally) Gitea per scenario suite; LLM uses `ReplayClient` with committed fixtures. `bats` for shell-level orchestration of multi-process scenarios; Go testing for in-process scenarios.
 
 #### Pyramid invariants
 
@@ -324,8 +324,10 @@ Multi-layer defense in depth:
 3. **CI (when wired)** — automated enforcement:
    - Unit + integration + contract tests on every PR
    - Scenario tests on every release candidate + nightly
-   - Type check (TypeScript strict mode) on every PR
-   - Lint (ESLint with project rules) on every PR
+   - `go vet ./...` on every PR
+   - `golangci-lint run` on every PR
+   - `gofmt -l .` (fail if any unformatted files) on every PR
+   - `go mod tidy` drift check on every PR
 4. **Release gate** — no release ships with red tests at any pyramid level.
 
 Each layer is necessary but not sufficient. A PR passing CI but violating SOLID surfaces in code review. A PR passing review but missing scenario tests fails the release gate.
@@ -357,31 +359,66 @@ That's the complete list. **There is no "we're in a hurry" or "the test is hard 
 
 | Concern | Tool |
 |---|---|
-| Language | TypeScript (strict mode) |
-| Runtime | Node.js (current LTS) |
-| Unit + Integration + Contract tests | [vitest](https://vitest.dev) |
-| Scenario tests | vitest (in-process) + [bats](https://bats-core.readthedocs.io/) (multi-process / shell) |
-| Coverage | vitest's built-in (c8) |
-| Lint | ESLint + `@typescript-eslint` |
-| Format | Prettier |
-| Type check | `tsc --noEmit` in CI |
-| Test containers | docker-compose for MediaWiki, git server fixtures |
-| LLM fixtures | Recorded responses keyed by `(prompt_hash, model_id)`, committed to `tests/fixtures/llm/` |
+| Language | Go 1.23 |
+| CLI | `github.com/spf13/cobra` |
+| Config | `gopkg.in/yaml.v3` + hand-rolled validation |
+| Cache | `go.etcd.io/bbolt` (lands v0.5) |
+| Unit tests | standard `testing` + `github.com/stretchr/testify` |
+| Integration tests | same, gated by `//go:build integration` |
+| Contract tests | same, gated by `//go:build contract` |
+| Scenario tests | same, gated by `//go:build scenario`; `bats` for multi-process shell scenarios |
+| Containers (in tests) | `testcontainers-go` |
+| Coverage | `go test -coverprofile=cover.out` |
+| Lint | `golangci-lint` — config in `.golangci.yml` |
+| Format | `gofmt` / `goimports` (enforced in CI) |
+| Static analysis | `go vet`, `staticcheck` (via golangci-lint) |
+| LLM fixtures | Recorded responses keyed by `sha256(model|prompt|system|max_tokens|stop...)`, committed to `test/fixtures/llm/` and consumed by `internal/llm.ReplayClient` |
+| Mocking | Hand-rolled test doubles — no `mockery`/`gomock` (keeps interfaces honest) |
+| CI | GitHub Actions (`.github/workflows/`) |
 
-Vitest test markers / suites:
+Build-tag conventions per pyramid level:
 
-```ts
-// tests/unit/passes/resolve-kbrefs.test.ts
-describe('ResolveKBRefs', () => { ... });
+```go
+// internal/pipelines/rendering/passes/resolve_kbrefs_test.go
+// (no build tag — runs in default `go test ./...`)
+package passes
 
-// tests/integration/rendering-pipeline.test.ts
-describe('Rendering pipeline against fixture kb', () => { ... });
+func TestResolveKBRefs(t *testing.T) { ... }
 
-// tests/contract/wiki-target.contract.test.ts
-describe.each(allWikiTargetImpls)('WikiTarget contract — %s', (impl) => { ... });
+// test/integration/rendering_pipeline_test.go
+//go:build integration
 
-// tests/scenario/first-render.scenario.test.ts
-describe('Scenario: first render of a projection page', () => { ... });
+package integration_test
+
+func TestRenderingPipeline_AgainstFixtureKB(t *testing.T) { ... }
+
+// test/contract/wiki_target_contract_test.go
+//go:build contract
+
+package contract_test
+
+func TestWikiTargetContract(t *testing.T) {
+    for _, impl := range allImpls { runContractSuite(t, impl) }
+}
+
+// test/scenario/first_render_test.go
+//go:build scenario
+
+package scenario_test
+
+func TestFirstRenderProjectionPage(t *testing.T) { ... }
+```
+
+Make targets:
+
+```
+make             # check: fmt + vet + lint + unit
+make test-unit
+make test-integration
+make test-contract
+make test-scenario
+make test-all
+make build
 ```
 
 ---

@@ -1,10 +1,11 @@
-node_modules/
-dist/
-.cache/
+/bin/
+/dist/
 *.log
 .env
 .env.*
 .DS_Store
-coverage/
+coverage.out
+cover.out
+*.test
 .vscode/
 .idea/

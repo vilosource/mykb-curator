@@ -1,0 +1,29 @@
+name: Nightly
+
+on:
+  schedule:
+    # 02:00 UTC daily
+    - cron: '0 2 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  scenario:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          check-latest: true
+          cache: true
+
+      - name: scenario tests
+        run: |
+          if find test/scenario -name '*_test.go' 2>/dev/null | grep -q .; then
+            make test-scenario
+          else
+            echo "no scenario tests yet — skipping"
+          fi

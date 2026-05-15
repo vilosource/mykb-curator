@@ -1,0 +1,29 @@
+# Test MediaWiki fixture for local development.
+#
+# Most tests use testcontainers-go to manage MediaWiki lifecycle
+# programmatically — this docker-compose file is the human-facing
+# equivalent for running a wiki locally to poke at by hand.
+#
+# Usage:
+#   docker compose -f deployments/mediawiki/docker-compose.yml up -d
+#   open http://localhost:8181
+#   docker compose ... down -v
+
+services:
+  mediawiki:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mykb-curator/test-mediawiki:dev
+    container_name: mykb-curator-test-mediawiki
+    ports:
+      - "8181:80"
+    environment:
+      MW_SERVER: "http://localhost:8181"
+    volumes:
+      - mediawiki-data:/var/www/data
+      - mediawiki-uploads:/var/www/uploads
+
+volumes:
+  mediawiki-data:
+  mediawiki-uploads:
