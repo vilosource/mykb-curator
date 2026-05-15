@@ -26,6 +26,8 @@ import (
 	"github.com/vilosource/mykb-curator/internal/adapters/specs"
 	"github.com/vilosource/mykb-curator/internal/adapters/specs/localfs"
 	wikipkg "github.com/vilosource/mykb-curator/internal/adapters/wiki"
+	"github.com/vilosource/mykb-curator/internal/adapters/wiki/mediawiki"
+	"github.com/vilosource/mykb-curator/internal/adapters/wiki/memory"
 	"github.com/vilosource/mykb-curator/internal/config"
 	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/orchestrator"
@@ -100,19 +102,23 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir string) error
 	if err != nil {
 		return err
 	}
+	wikiTarget, err := composeWikiTarget(cfg)
+	if err != nil {
+		return err
+	}
 
 	frontendRegistry := frontends.NewRegistry()
 	frontendRegistry.Register(projection.New())
 
 	passPipeline := passes.NewPipeline(zonemarkers.New())
 
-	onRendered := buildOnRenderedSink(outDir)
+	onRendered := composeOnRenderedSink(ctx, cfg, wikiTarget, outDir)
 
 	orch := orchestrator.New(orchestrator.Deps{
 		Wiki:       cfg.Wiki,
 		KB:         kbSrc,
 		Specs:      specStore,
-		WikiTarget: stubWikiTarget{},
+		WikiTarget: wikiTarget,
 		LLM:        stubLLM{},
 		Frontends:  frontendRegistry,
 		Passes:     passPipeline,
@@ -133,14 +139,23 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir string) error
 	return nil
 }
 
-// buildOnRenderedSink returns a sink that writes each rendered spec
-// to <outDir>/<spec-id-sans-slashes>.md if outDir is non-empty.
-// Returns nil for an empty outDir, which means "render but discard"
-// — useful for smoke runs.
-func buildOnRenderedSink(outDir string) func(string, []byte, ir.Document) error {
-	if outDir == "" {
-		return nil
+// composeOnRenderedSink builds the OnRendered callback based on
+// config + flags. Priority order:
+//  1. If outDir is set, write to disk (offline preview mode).
+//  2. Else if wiki target is a real wiki (mediawiki / memory),
+//     upsert via the wiki target.
+//  3. Else nil (render-and-discard).
+func composeOnRenderedSink(ctx context.Context, cfg *config.Config, target wikipkg.Target, outDir string) func(string, []byte, ir.Document) error {
+	if outDir != "" {
+		return makeDiskSink(outDir)
 	}
+	if cfg.WikiTarget.Type == "mediawiki" || cfg.WikiTarget.Type == "memory" {
+		return makeWikiUpsertSink(ctx, target)
+	}
+	return nil
+}
+
+func makeDiskSink(outDir string) func(string, []byte, ir.Document) error {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		fmt.Fprintln(os.Stderr, "warning: cannot create out dir:", err)
 		return nil
@@ -150,6 +165,57 @@ func buildOnRenderedSink(outDir string) func(string, []byte, ir.Document) error 
 		safe = strings.TrimSuffix(safe, ".spec.md")
 		path := filepath.Join(outDir, safe+".md")
 		return os.WriteFile(path, rendered, 0o600)
+	}
+}
+
+// makeWikiUpsertSink pushes each rendered spec to the wiki under
+// the page title declared in the spec's frontmatter. The spec ID
+// (filename) is unrelated to the page title, so we read the title
+// from the IR's Frontmatter.
+func makeWikiUpsertSink(ctx context.Context, target wikipkg.Target) func(string, []byte, ir.Document) error {
+	return func(specID string, rendered []byte, doc ir.Document) error {
+		title := doc.Frontmatter.Title
+		if title == "" {
+			return fmt.Errorf("wiki upsert: spec %s produced IR with empty frontmatter.Title", specID)
+		}
+		summary := fmt.Sprintf("mykb-curator: rendered from %s", specID)
+		_, err := target.UpsertPage(ctx, title, string(rendered), summary)
+		return err
+	}
+}
+
+func composeWikiTarget(cfg *config.Config) (wikipkg.Target, error) {
+	switch cfg.WikiTarget.Type {
+	case "mediawiki":
+		if cfg.WikiTarget.URL == "" {
+			return nil, fmt.Errorf("wiki_target.url: required for type=mediawiki")
+		}
+		if cfg.WikiTarget.Auth.User == "" {
+			return nil, fmt.Errorf("wiki_target.auth.user: required for type=mediawiki")
+		}
+		pass := os.Getenv(cfg.WikiTarget.Auth.PasswordEnv)
+		if pass == "" {
+			return nil, fmt.Errorf("wiki_target.auth.password_env=%q: env var unset or empty", cfg.WikiTarget.Auth.PasswordEnv)
+		}
+		return mediawiki.New(mediawiki.Config{
+			APIURL:  cfg.WikiTarget.URL,
+			BotUser: cfg.WikiTarget.Auth.User,
+			BotPass: pass,
+		})
+	case "memory":
+		bot := cfg.WikiTarget.Auth.User
+		if bot == "" {
+			bot = "User:Mykb-Curator"
+		}
+		return memory.New(bot), nil
+	case "markdown":
+		// markdown-target is a no-op wiki: rendering still happens
+		// (so the run report is real), but pushes go via the disk
+		// sink instead. Returns a memory target so HumanEditsSinceBot
+		// has a working impl during reconciliation tests.
+		return memory.New("User:Markdown-Dryrun"), nil
+	default:
+		return nil, fmt.Errorf("wiki_target.type=%q: unknown (known: mediawiki, memory, markdown)", cfg.WikiTarget.Type)
 	}
 }
 
@@ -194,22 +260,6 @@ func composeKBSource(cfg *config.Config) (kbpkg.Source, error) {
 	default:
 		return nil, fmt.Errorf("kb_source.type=%q: unknown (known: local, git)", cfg.KBSource.Type)
 	}
-}
-
-type stubWikiTarget struct{}
-
-func (stubWikiTarget) Whoami(context.Context) (string, error) { return "stub-wiki", nil }
-func (stubWikiTarget) GetPage(context.Context, string) (*wikipkg.Page, error) {
-	return nil, nil
-}
-func (stubWikiTarget) UpsertPage(context.Context, string, string, string) (wikipkg.Revision, error) {
-	return wikipkg.Revision{}, nil
-}
-func (stubWikiTarget) History(context.Context, string, string) ([]wikipkg.Revision, error) {
-	return nil, nil
-}
-func (stubWikiTarget) HumanEditsSinceBot(context.Context, string, string) (*wikipkg.HumanEdit, error) {
-	return nil, nil
 }
 
 type stubLLM struct{}
