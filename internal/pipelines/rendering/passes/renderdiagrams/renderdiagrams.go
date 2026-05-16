@@ -46,6 +46,11 @@ import (
 // leave the block as-is, do not fail the pipeline.
 var ErrUnsupportedLang = errors.New("renderdiagrams: unsupported diagram language")
 
+// maxRepairAttempts bounds the iterative LLM repair loop. Each
+// attempt is one LLM call + one mmdc render; the model is given
+// mmdc's specific parse error each round and usually converges fast.
+const maxRepairAttempts = 4
+
 // Renderer turns diagram source into image bytes. Injected so the
 // pass stays deterministic and the mmdc subprocess stays out of unit
 // tests (same pattern as the editorial frontend's LLM client).
@@ -134,15 +139,27 @@ func (p *RenderDiagrams) renderOne(ctx context.Context, db ir.DiagramBlock) (ir.
 		if errors.Is(err, ErrUnsupportedLang) || p.repair == nil {
 			return db, nil
 		}
-		// One AI repair attempt: hand the bad source + the render
-		// error to the model, then re-render its fix exactly once.
-		// Still bad ⇒ degrade.
-		fixed, rerr := p.repair.Repair(ctx, db.Lang, db.Source, err.Error())
-		if rerr != nil || strings.TrimSpace(fixed) == "" || fixed == db.Source {
-			return db, nil
+		// Iterative AI repair: hand the current source + the latest
+		// renderer error to the model, re-render its fix, and feed
+		// the new error back if it still fails. mmdc's errors name
+		// the offending line, so the model usually converges within
+		// a few rounds. Bounded; still bad after the budget ⇒
+		// degrade to the escape-hatch.
+		cur, lastErr, ok := db.Source, err.Error(), false
+		for attempt := 0; attempt < maxRepairAttempts; attempt++ {
+			fixed, rerr := p.repair.Repair(ctx, db.Lang, cur, lastErr)
+			if rerr != nil || strings.TrimSpace(fixed) == "" || fixed == cur {
+				break
+			}
+			cur = fixed
+			img, ctype, err = p.r.Render(ctx, db.Lang, cur)
+			if err == nil {
+				ok = true
+				break
+			}
+			lastErr = err.Error()
 		}
-		img, ctype, err = p.r.Render(ctx, db.Lang, fixed)
-		if err != nil {
+		if !ok {
 			return db, nil
 		}
 	}

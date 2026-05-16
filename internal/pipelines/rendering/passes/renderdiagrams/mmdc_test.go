@@ -78,10 +78,25 @@ func TestSanitizeMermaid(t *testing.T) {
 			}
 		})
 	}
+	// The dominant LLM failure class: parentheses/colons inside a
+	// [square-bracket] node label. mermaid needs the label quoted.
+	labelCases := []struct{ in, want string }{
+		{"VaultA[Vault Node A (Leader)]", `VaultA["Vault Node A (Leader)"]`},
+		{"  M1[infra-swarm-mgr-1: manager]", `  M1["infra-swarm-mgr-1: manager"]`},
+		{`A["already quoted (x)"]`, `A["already quoted (x)"]`},
+		{"B[plain label]", "B[plain label]"},
+		{"C-->D[Has (parens) here] & E[clean]", `C-->D["Has (parens) here"] & E[clean]`},
+	}
+	for _, c := range labelCases {
+		if got := renderdiagrams.SanitizeMermaid(c.in); got != c.want {
+			t.Errorf("SanitizeMermaid(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+
 	// Idempotent + deterministic.
-	once := renderdiagrams.SanitizeMermaid("subgraph A (b)\nX(`y`)")
+	once := renderdiagrams.SanitizeMermaid("subgraph A (b)\nX(`y`)\nN[Foo (bar): baz]")
 	if renderdiagrams.SanitizeMermaid(once) != once {
-		t.Errorf("SanitizeMermaid not idempotent")
+		t.Errorf("SanitizeMermaid not idempotent: %q", once)
 	}
 }
 

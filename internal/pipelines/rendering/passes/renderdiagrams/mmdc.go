@@ -10,7 +10,12 @@ import (
 	"strings"
 )
 
-var reMermaidSubgraph = regexp.MustCompile(`^(\s*subgraph\s+)(\S.*?)\s*$`)
+var (
+	reMermaidSubgraph = regexp.MustCompile(`^(\s*subgraph\s+)(\S.*?)\s*$`)
+	// A single [square-bracket] node label (not [[ ]] / [/ /] shapes —
+	// the inner class excludes brackets and slashes).
+	reMermaidLabel = regexp.MustCompile(`\[([^\[\]/]+)\]`)
+)
 
 // SanitizeMermaid conservatively repairs the two mermaid syntax
 // mistakes LLM-authored diagrams hit most often, so a slightly-off
@@ -23,10 +28,15 @@ var reMermaidSubgraph = regexp.MustCompile(`^(\s*subgraph\s+)(\S.*?)\s*$`)
 //     fails to parse; mermaid needs the title quoted. Quoted (unless
 //     it is already quoted, an id-only token, or the `id [Title]`
 //     form).
+//   - parentheses/colons inside a [square-bracket] node label
+//     (`A[Vault Node (Leader)]`) — the single most common LLM
+//     mistake. mermaid needs the label quoted: `A["Vault Node
+//     (Leader)"]`. Skipped if already quoted; [[ ]] / [/ /] shapes
+//     are left alone (the inner class excludes brackets/slashes).
 //
-// Deliberately narrow + idempotent: it only touches these two known
-// failure classes, so already-valid diagrams pass through byte-for-
-// byte. Add further repairs only as new failure classes are observed.
+// Idempotent: already-valid (or already-repaired) diagrams pass
+// through byte-for-byte. A determinstic first line of defence — the
+// LLM repair loop handles whatever syntax this does not.
 func SanitizeMermaid(src string) string {
 	lines := strings.Split(src, "\n")
 	for i, line := range lines {
@@ -42,7 +52,18 @@ func SanitizeMermaid(src string) string {
 			lines[i] = m[1] + `"` + title + `"`
 		}
 	}
-	return strings.ReplaceAll(strings.Join(lines, "\n"), "`", "")
+	s := strings.Join(lines, "\n")
+	s = reMermaidLabel.ReplaceAllStringFunc(s, func(tok string) string {
+		inner := tok[1 : len(tok)-1]
+		if strings.HasPrefix(inner, `"`) && strings.HasSuffix(inner, `"`) {
+			return tok // already quoted
+		}
+		if strings.ContainsAny(inner, "():") {
+			return `["` + inner + `"]`
+		}
+		return tok
+	})
+	return strings.ReplaceAll(s, "`", "")
 }
 
 // MermaidRenderer is the production Renderer. It shells out to the
