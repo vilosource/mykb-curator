@@ -90,6 +90,11 @@ Status legend: **OPEN** (not yet discussed) · **DISCUSSING** ·
    of wiki location; that remains open under #5. Substrate note:
    the harness wiki is a dev fixture (SQLite; data = the compose
    volume); durable-personal-wiki substrate is a later choice.
+   **Amendment 2026-05-16**: user will stand up a dedicated
+   personal local wiki at `localhost:8881` and request the switch
+   later; interim target remains the harness wiki
+   (`localhost:8181`). Do not point at :8881 until explicitly
+   asked.
 9. **Non-determinism & cost.** Agentic exploration is variable and
    token/time-heavy; belongs behind the funding gate, bounded,
    cached, scheduled — not every render. — **OPEN**
