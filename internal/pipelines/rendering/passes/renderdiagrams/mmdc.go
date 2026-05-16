@@ -6,7 +6,44 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strings"
 )
+
+var reMermaidSubgraph = regexp.MustCompile(`^(\s*subgraph\s+)(\S.*?)\s*$`)
+
+// SanitizeMermaid conservatively repairs the two mermaid syntax
+// mistakes LLM-authored diagrams hit most often, so a slightly-off
+// diagram still renders instead of degrading to a <pre> block:
+//
+//   - Backticks in labels: LLMs code-format words (e.g. an overlay
+//     network name) inside node labels; backticks are not valid in
+//     plain flowchart/sequence labels and make mmdc fail. Stripped.
+//   - subgraph titles containing parentheses: `subgraph Foo (Bar)`
+//     fails to parse; mermaid needs the title quoted. Quoted (unless
+//     it is already quoted, an id-only token, or the `id [Title]`
+//     form).
+//
+// Deliberately narrow + idempotent: it only touches these two known
+// failure classes, so already-valid diagrams pass through byte-for-
+// byte. Add further repairs only as new failure classes are observed.
+func SanitizeMermaid(src string) string {
+	lines := strings.Split(src, "\n")
+	for i, line := range lines {
+		m := reMermaidSubgraph.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		title := m[2]
+		if strings.HasPrefix(title, `"`) || strings.Contains(title, "[") {
+			continue // already quoted, or the `subgraph id [Title]` form
+		}
+		if strings.ContainsAny(title, "()") {
+			lines[i] = m[1] + `"` + title + `"`
+		}
+	}
+	return strings.ReplaceAll(strings.Join(lines, "\n"), "`", "")
+}
 
 // MermaidRenderer is the production Renderer. It shells out to the
 // mermaid CLI (`mmdc`) to turn mermaid source into a PNG.
@@ -74,7 +111,10 @@ func (m *MermaidRenderer) Render(ctx context.Context, lang, source string) ([]by
 
 	in := filepath.Join(dir, "diagram.mmd")
 	out := filepath.Join(dir, "diagram.png")
-	if err := os.WriteFile(in, []byte(source), 0o600); err != nil {
+	// Conservatively repair the syntax mistakes LLMs make most often
+	// so a slightly-off diagram renders instead of degrading to a
+	// code block.
+	if err := os.WriteFile(in, []byte(SanitizeMermaid(source)), 0o600); err != nil {
 		return nil, "", fmt.Errorf("mmdc: write source: %w", err)
 	}
 

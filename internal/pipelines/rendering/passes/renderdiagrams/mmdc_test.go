@@ -43,6 +43,48 @@ func contains(ss []string, want string) bool {
 	return false
 }
 
+func TestSanitizeMermaid(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{
+			"backticks in label removed",
+			"graph TD\n  OV(Swarm Overlay Network `infra-net`)",
+			"graph TD\n  OV(Swarm Overlay Network infra-net)",
+		},
+		{
+			"subgraph title with parens quoted",
+			"subgraph Vault Cluster (Raft HA)\nend",
+			"subgraph \"Vault Cluster (Raft HA)\"\nend",
+		},
+		{
+			"already-quoted subgraph untouched",
+			"subgraph \"X (Y)\"\nend",
+			"subgraph \"X (Y)\"\nend",
+		},
+		{
+			"plain subgraph untouched",
+			"subgraph Clients\nend",
+			"subgraph Clients\nend",
+		},
+		{
+			"valid diagram unchanged",
+			"graph TD; A-->B",
+			"graph TD; A-->B",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := renderdiagrams.SanitizeMermaid(c.in); got != c.want {
+				t.Errorf("SanitizeMermaid(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+	// Idempotent + deterministic.
+	once := renderdiagrams.SanitizeMermaid("subgraph A (b)\nX(`y`)")
+	if renderdiagrams.SanitizeMermaid(once) != once {
+		t.Errorf("SanitizeMermaid not idempotent")
+	}
+}
+
 func TestMermaidRenderer_RealRender(t *testing.T) {
 	// Environment-gated: exercises the real mmdc subprocess only where
 	// mmdc is installed (the curator container / nightly). Skipped —
