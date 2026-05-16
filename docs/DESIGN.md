@@ -982,9 +982,7 @@ The numbered milestones below were the original sequencing plan; status is updat
 - GitHub Actions CI green on every PR (Go 1.25, golangci-lint v2)
 - TDD red/green discipline followed for every behaviour-bearing component
 
-### Not yet
-
-**v1.0 — Production hardening** (in progress)
+**v1.0 — Production hardening** ✓ (complete 2026-05-16)
 
 - ✓ (landed 2026-05-16) Diagram rendering pass: `RenderDiagrams` pass +
   `wiki.Target.UploadFile`. Mermaid is first-class via an injected
@@ -1036,7 +1034,16 @@ The numbered milestones below were the original sequencing plan; status is updat
   stale-lock heuristics. Verified L1 (round-trip, second-blocked,
   independent paths, 16-goroutine race under `-race`: exactly one
   holder) + L2 (concurrent-runs-rejected scenario).
-- Spec authoring guide + CONTRIBUTING.md
+- ✓ (landed 2026-05-16) Spec authoring guide + `CONTRIBUTING.md`:
+  `docs/spec-authoring-guide.md` (frontmatter fields the parser
+  actually reads, kind selection, the `fact_check` funding gate,
+  the config-driven house-style note + per-spec-`style:` not-yet
+  caveat) and root `CONTRIBUTING.md` (the non-negotiable
+  TDD/four-level-pyramid/DESIGN-is-truth process, Makefile pyramid,
+  golangci-lint-v2 + Go-1.25 toolchain, commit rules incl. no
+  AI-attribution trailer, and the extension-point map).
+
+### Not yet
 
 **v2+ — Extensibility**
 
