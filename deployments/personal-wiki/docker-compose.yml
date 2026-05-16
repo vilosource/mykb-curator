@@ -1,0 +1,39 @@
+# Personal daily-use MediaWiki — DURABLE, independent of the test
+# harness.
+#
+# This is NOT the harness wiki. The harness (deployments/
+# docker-compose.yml, port 8181) is disposable test infra and
+# `make harness-down -v` destroys its volume. THIS instance is the
+# one you read every day; it has its own named volume, its own
+# container name, and restart:unless-stopped so it survives reboots.
+# Nothing here is torn down by the harness targets.
+#
+# Reuses the proven deployments/mediawiki image (bootstrap.sh:
+# first-boot SQLite install + uploads + Admin promoted to bot, so
+# it is curator-ready out of the box).
+#
+#   make personal-wiki-up      # build + start (idempotent)
+#   open http://localhost:8881 # login: Admin / adminpassword-9999
+#   make personal-wiki-stop    # stop WITHOUT deleting data
+#
+# There is deliberately no `down -v` target — your data lives in
+# the mykb-personal-wiki-data volume and must not be casually
+# destroyed.
+
+services:
+  personal-wiki:
+    build:
+      context: ../mediawiki
+      dockerfile: Dockerfile
+    image: mykb-curator/personal-wiki:dev
+    container_name: mykb-personal-wiki
+    restart: unless-stopped
+    ports:
+      - "8881:80"
+    environment:
+      MW_SERVER: "http://localhost:8881"
+    volumes:
+      - mykb-personal-wiki-data:/var/www/data
+
+volumes:
+  mykb-personal-wiki-data:

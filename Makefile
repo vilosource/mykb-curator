@@ -10,10 +10,11 @@ GO ?= go
 GOLANGCI_LINT ?= golangci-lint
 COMPOSE ?= docker compose
 HARNESS_COMPOSE ?= deployments/docker-compose.yml
+PERSONAL_WIKI_COMPOSE ?= deployments/personal-wiki/docker-compose.yml
 
 PKG ?= ./...
 
-.PHONY: help check build test test-unit test-integration test-contract test-scenario test-all lint fmt vet tidy clean harness-up harness-down
+.PHONY: help check build test test-unit test-integration test-contract test-scenario test-all lint fmt vet tidy clean harness-up harness-down personal-wiki-up personal-wiki-stop
 
 help:
 	@echo "Targets:"
@@ -29,6 +30,8 @@ help:
 	@echo "  fmt               — gofmt -w . (covers build-tagged files)"
 	@echo "  harness-up        — build+run MediaWiki+pi-harness (experiment loop)"
 	@echo "  harness-down      — tear the harness down (-v)"
+	@echo "  personal-wiki-up  — build+run the DURABLE personal wiki (:8881)"
+	@echo "  personal-wiki-stop— stop the personal wiki (keeps data)"
 	@echo "  vet               — go vet ./..."
 	@echo "  tidy              — go mod tidy"
 	@echo "  clean             — rm -rf ./bin"
@@ -69,6 +72,15 @@ harness-up:
 
 harness-down:
 	$(COMPOSE) -f $(HARNESS_COMPOSE) down -v
+
+# Personal daily wiki — DURABLE. No `-v`/down target on purpose:
+# the data volume must not be casually destroyed.
+personal-wiki-up:
+	$(COMPOSE) -f $(PERSONAL_WIKI_COMPOSE) up -d --build
+	@echo "personal wiki → http://localhost:8881  (Admin / adminpassword-9999)"
+
+personal-wiki-stop:
+	$(COMPOSE) -f $(PERSONAL_WIKI_COMPOSE) stop
 
 vet:
 	$(GO) vet $(PKG)
