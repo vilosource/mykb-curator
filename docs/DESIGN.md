@@ -917,7 +917,7 @@ Tech choices:
 | Cache | `go.etcd.io/bbolt` (v0.5) | Pure-Go embedded B+tree; key-value shape matches `(spec_hash, kb_hash) → IR`; ACID; one file per wiki. |
 | Git | `go-git/go-git` initially; shell-out as fallback | Pure-Go; no system git dep; sufficient for read-mostly use. |
 | MediaWiki client | Evaluate `go-mwclient`; write own thin client if it falls short | API is contained (~800 lines); contract test suite makes either choice safe. |
-| LLM clients | Hand-rolled per provider (anthropic, pi-wrapper); `ReplayClient` and `RecordingClient` decorators | Boundary controlled at the curator; no SDK lock-in. |
+| LLM clients | Hand-rolled per provider (anthropic, pi-wrapper); `ReplayClient` and `RecordingClient` decorators | Boundary controlled at the curator; no SDK lock-in. **Status: `anthropic`/`replay`/`recording` built; the `pi` impl + `pi-harness` container are unbuilt scaffolding — tracked under §17 "Not yet → v1.x".** |
 | Diagram rendering | Mermaid (default) via `mmdc` subprocess; pre-rendered images as escape hatch for diagrams mermaid can't express | Curator container ships with `mmdc`; only mermaid is first-class. |
 | Tests — unit / integration / contract | Standard `testing` + `testify`; build tags for level gating | Go-idiomatic; hand-rolled test doubles preferred over generated mocks. |
 | Tests — containers | `testcontainers-go` for MediaWiki + Pi-harness + Gitea (optional) | Programmatic lifecycle; no docker-compose orchestration glue. |
@@ -1044,6 +1044,40 @@ The numbered milestones below were the original sequencing plan; status is updat
   AI-attribution trailer, and the extension-point map).
 
 ### Not yet
+
+**v1.x — Live-agent experiment harness**
+
+> Roadmap-honesty note (2026-05-16): the architecture (§15 layout,
+> §16 deps) has always specified a `pi` LLM impl + a `deployments/
+> pi-harness` Pi container + a `cmd/pi-wrapper` HTTP shim, so the
+> curator's editorial frontend can be driven by a *live Pi agent*
+> and an L4 scenario can run Pi + MediaWiki together as an
+> experiment loop. The v0.5 roadmap rewrite marked the editorial
+> LLM stack "Done" with only Anthropic/Cache/Replay/Recording and
+> never re-entered the Pi harness here as a tracked item — so an
+> unbuilt architectural component was implied-done by omission.
+> This entry restores that tracking. Verified-unbuilt:
+> `internal/llm/pi.go` absent; `cmd/pi-wrapper` `invokePi` is a
+> stub; `deployments/{mediawiki,pi-harness}/Dockerfile` bootstrap
+> is TBD; no repo-root curator runtime `Dockerfile`.
+
+- `PiClient` LLM impl (HTTP to the pi-harness shim) + `pi` case in
+  the composition root (`config.LLM.Endpoint` already reserved
+  "for pi: the pi-harness URL")
+- Finish `cmd/pi-wrapper` `invokePi` against the real `pi --print
+  --mode json` batch contract
+- Make `deployments/mediawiki` + `deployments/pi-harness`
+  first-boot-bootstrapping real images (lift the proven MediaWiki
+  bootstrap out of `mediawiki_fixture_test.go`; single source of
+  truth)
+- Repo-root curator runtime `Dockerfile` (ships with `mmdc`;
+  unblocks the real mermaid-render path deferred in v1.0 item 1)
+- Agentic L4 scenario: testcontainers spins up pi-harness +
+  MediaWiki, curator `llm.provider=pi`, a spec is authored onto the
+  real wiki by the live agent (nightly-gated; skip-with-reason
+  without a Pi model key)
+- `make harness-up` / `harness-down` for the hand-driven experiment
+  loop
 
 **v2+ — Extensibility**
 
