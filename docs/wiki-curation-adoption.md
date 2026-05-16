@@ -66,7 +66,15 @@ Status legend: **OPEN** (not yet discussed) · **DISCUSSING** ·
    allow-listed verbs, scoped read-only identity, never
    `terraform apply`, `plan`/`kubectl exec` are not innocuous;
    typed scoped probes vs. raw shell. Highest blast radius in the
-   system. — **OPEN**
+   system. — **RESOLVED 2026-05-16**: safety contract accepted.
+   Two unbreakable rules: (2) dedicated scoped **read-only
+   identity** — never user creds, never write roles; (3) hard
+   **no-secret rule** — never read or record secret material;
+   evidence is non-secret, redacted. Defense-in-depth on top:
+   read-verb allow-list (default-deny; no `terraform apply`;
+   `plan`/`exec` excluded), typed scoped probe tools (not raw
+   shell), bounded (call/time caps), and PR-only output (proposes;
+   never auto-mutates kb or wiki — human approves).
 6. **Agent reliability / evidence.** An LLM reading az/kubectl
    output can be wrong; proposals must carry primary evidence
    (exact command + raw output + timestamp); humans review evidence,
@@ -125,6 +133,18 @@ LinkRotCheck, ExternalTruthCheck) already turns that into
 MutationProposals → PR via prbackend, intended to run nightly. So
 the brain self-curates; the human architects new pages + reviews
 proposals.
+
+### 2026-05-16 — Issue #5 (fact-checking agent safety) — RESOLVED
+
+Safety contract accepted. Hard rules: scoped read-only identity
+(never user creds / write roles) + never touch secrets (no read,
+no record; evidence redacted). Plus defense-in-depth: read-verb
+allow-list / no terraform apply / typed probe tools / bounded /
+PR-only (the agent proposes evidence-backed changes; a human
+approves; it never edits the brain or wiki itself). Mental model
+agreed: it is a *reviewer that checks facts against live reality
+and returns an evidence-backed report* — distinct from and
+composable with the Judge (#1, page quality/grounding).
 
 ### 2026-05-16 — Issues #8 + #11 — RESOLVED (descoped)
 
