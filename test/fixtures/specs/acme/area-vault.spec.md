@@ -23,7 +23,7 @@ Structure the page roughly as:
    auth methods, secret engines, policies, leases/TTLs). Keep it
    short and concrete.
 2. **Why we use it / key decisions** — narrate the architectural
-   decisions (VAULT-001…VAULT-004): what we chose, what we rejected,
+   decisions (VAULT-001…VAULT-005): what we chose, what we rejected,
    and why. This is institutional memory; make the trade-offs clear.
 3. **How our cluster is built** — the 3-node Raft HA topology,
    Integrated Storage, Azure Key Vault auto-unseal, version,
@@ -31,18 +31,30 @@ Structure the page roughly as:
    Include a **mermaid diagram** of the cluster topology + how
    clients reach the active leader, and a **mermaid diagram** of the
    auto-unseal flow on node startup.
-4. **How an application gets a secret** — the Kubernetes-auth →
+4. **Production setup** — be concrete and operator-useful: exactly
+   which servers Vault runs on (the named swarm manager hosts and
+   their specs), its relationship to the shared **infra Docker
+   Swarm** (Swarm service, replica count, placement constraints
+   pinning replicas to the managers, the overlay network, why
+   ports are not host-published), and **how you actually reach
+   Vault** end-to-end (Traefik on the swarm → TLS for
+   vault.acme.internal → active leader; no direct node/container
+   access). Include a **mermaid deployment diagram** showing the
+   swarm managers, the pinned Vault replicas, the overlay network,
+   Traefik ingress, and the client entry point. Cover decision
+   VAULT-005 here.
+5. **How an application gets a secret** — the Kubernetes-auth →
    short-lived token → scoped KV read path. Include a **mermaid
    sequence diagram** of that exchange. Mention dynamic database
    credentials.
-5. **Access & security model** — auth methods (Kubernetes / OIDC /
+6. **Access & security model** — auth methods (Kubernetes / OIDC /
    AppRole), least-privilege per-app policies, audit device
    (fail-closed), enabled secret engines and what each is for.
-6. **Operations** — auto-unseal dependency on Azure KV, nightly
+7. **Operations** — auto-unseal dependency on Azure KV, nightly
    Raft snapshot + retention + the DR runbook, telemetry/alerting,
    and the known gotchas (sealed-until-Azure-reachable,
    leader-only-writes, short token TTLs).
-7. **References** — link out to the official docs and the internal
+8. **References** — link out to the official docs and the internal
    DR runbook.
 
 Diagrams: use fenced ```mermaid blocks (flowchart for topology +

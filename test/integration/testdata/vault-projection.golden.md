@@ -87,6 +87,36 @@ Telemetry is exported in Prometheus format and scraped into the observability st
 
 <!-- CURATOR:END block=s1-b11 -->
 
+<!-- CURATOR:BEGIN block=s1-b12 zone=editorial provenance=2bf2166925a1e48221f6434ab92d809c95d4f9c3d858d4554e1325ff85718a39:vault-f13: -->
+
+Vault runs on the shared infra Docker Swarm (the same cluster that hosts Harbor and Traefik), deployed as the Swarm service named 'vault' with 3 replicas
+
+<!-- CURATOR:END block=s1-b12 -->
+
+<!-- CURATOR:BEGIN block=s1-b13 zone=editorial provenance=2bf2166925a1e48221f6434ab92d809c95d4f9c3d858d4554e1325ff85718a39:vault-f14: -->
+
+The 3 Vault replicas are pinned via Swarm placement constraints to the 3 swarm manager nodes infra-swarm-mgr-1, infra-swarm-mgr-2 and infra-swarm-mgr-3, so the Raft quorum maps 1:1 onto the managers (losing one manager keeps quorum)
+
+<!-- CURATOR:END block=s1-b13 -->
+
+<!-- CURATOR:BEGIN block=s1-b14 zone=editorial provenance=2bf2166925a1e48221f6434ab92d809c95d4f9c3d858d4554e1325ff85718a39:vault-f15: -->
+
+Each swarm manager node is an Ubuntu 22.04 VM (4 vCPU / 8 GB RAM) with a dedicated local volume bind-mounted at /vault/data for the node's Raft store
+
+<!-- CURATOR:END block=s1-b14 -->
+
+<!-- CURATOR:BEGIN block=s1-b15 zone=editorial provenance=2bf2166925a1e48221f6434ab92d809c95d4f9c3d858d4554e1325ff85718a39:vault-f16: -->
+
+Vault attaches to the encrypted Swarm overlay network 'infra-net'; ports 8200/8201 are NOT published on the host — they are reachable only inside the overlay, never on a node IP
+
+<!-- CURATOR:END block=s1-b15 -->
+
+<!-- CURATOR:BEGIN block=s1-b16 zone=editorial provenance=2bf2166925a1e48221f6434ab92d809c95d4f9c3d858d4554e1325ff85718a39:vault-f17: -->
+
+Clients reach Vault only through Traefik, which also runs on the swarm: Traefik terminates TLS for https://vault.acme.internal and load-balances across the healthy Vault replicas, redirecting to the active Raft leader. Apps, human operators and CI all use that single hostname; there is no direct node or container access
+
+<!-- CURATOR:END block=s1-b16 -->
+
 ## Decisions
 
 <!-- CURATOR:BEGIN block=s2-b0 zone=editorial provenance=2bf2166925a1e48221f6434ab92d809c95d4f9c3d858d4554e1325ff85718a39:vault-d1: -->
@@ -120,6 +150,14 @@ Why: Versioned secrets + soft-delete give an audit trail and accidental-overwrit
 Rejected: KV v1 (no versioning)
 
 <!-- CURATOR:END block=s2-b3 -->
+
+<!-- CURATOR:BEGIN block=s2-b4 zone=editorial provenance=2bf2166925a1e48221f6434ab92d809c95d4f9c3d858d4554e1325ff85718a39:vault-d5: -->
+
+VAULT-005: Run Vault on the shared infra Docker Swarm with replicas pinned to the manager nodes
+Why: Reuses the existing managed swarm (Traefik ingress, overlay networking, deploy tooling) instead of operating a separate cluster; pinning to the 3 managers makes the Raft quorum coincide with the swarm control-plane quorum
+Rejected: A dedicated 3-VM Vault cluster outside the swarm (more infrastructure to run and patch for no isolation benefit at our scale)
+
+<!-- CURATOR:END block=s2-b4 -->
 
 ## Gotchas
 
