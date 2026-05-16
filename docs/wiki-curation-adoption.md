@@ -79,7 +79,17 @@ Status legend: **OPEN** (not yet discussed) · **DISCUSSING** ·
    curator needs wiki-bot creds and (for §2) cloud read creds,
    under the Optiscan vs viloforge separation rule and the Entra
    App Proxy in front of the wiki. Where it runs, what identity,
-   audit. — **OPEN**
+   audit. — **RESOLVED (descoped) 2026-05-16**: target is NOT
+   optiscangroup.com. For now the curator runs against a
+   personal, local MediaWiki = the harness wiki at
+   `localhost:8181` (`deployments/docker-compose.yml`). This
+   moots the wiki-side credential/separation/Entra concerns
+   (single local trust domain, plain bot password). NOTE: the
+   *reality-probe cloud-read credential* concern (issues #2/#5) is
+   NOT removed — fact-checking still probes real infra regardless
+   of wiki location; that remains open under #5. Substrate note:
+   the harness wiki is a dev fixture (SQLite; data = the compose
+   volume); durable-personal-wiki substrate is a later choice.
 9. **Non-determinism & cost.** Agentic exploration is variable and
    token/time-heavy; belongs behind the funding gate, bounded,
    cached, scheduled — not every render. — **OPEN**
@@ -91,7 +101,9 @@ Status legend: **OPEN** (not yet discussed) · **DISCUSSING** ·
     sits behind Entra ID App Proxy (verified: 302 →
     login.microsoftonline.com); the MediaWiki adapter needs a
     bot/API route not behind interactive SSO, or to run inside the
-    boundary. — **OPEN**
+    boundary. — **RESOLVED (descoped) 2026-05-16**: not targeting
+    optiscangroup.com; target is the local harness wiki
+    (`localhost:8181`), no Entra/App-Proxy in path. Folded into #8.
 
 ## 4. Discussion log
 
@@ -109,7 +121,22 @@ MutationProposals → PR via prbackend, intended to run nightly. So
 the brain self-curates; the human architects new pages + reviews
 proposals.
 
-Two corrections recorded for faithfulness:
+### 2026-05-16 — Issues #8 + #11 — RESOLVED (descoped)
+
+Decision: do NOT run the curator against `optiscangroup.com`. For
+now it runs against a personal local wiki — the harness MediaWiki
+at `localhost:8181`. Collapses the Entra App Proxy, the
+Optiscan↔viloforge separation question, and the where-it-runs/
+identity question to "bot password against a local wiki" (single
+trust domain). Explicitly **not** resolved by this: the
+reality-probe needs real-infra read credentials regardless of
+where the wiki lives — that stays open under #5. The
+`wiki-api.optiscangroup.com` API endpoint + bot creds exist in the
+environment but are deliberately left untouched per this descope.
+
+---
+
+(Issue #3 corrections, recorded earlier for faithfulness:)
 - The earlier "Vault demo proves a brain-vs-wiki richness gap"
   claim is **withdrawn**: that demo ran against the synthetic
   `test/fixtures/kb/acme` fixture (deliberately ~3 facts), never
