@@ -1,0 +1,25 @@
+<!-- mykb-curator spec_hash=spec-abc123 kb_commit=kb-def456 generated_at=2026-05-15T08:30:00Z -->
+
+== Overview ==
+
+Vault is the centralised secrets manager.
+
+== Resource Groups ==
+
+<!-- CURATOR:BEGIN block=rg-table zone=machine provenance=h1 -->
+data
+
+<!-- CURATOR:END block=rg-table -->
+== Topology ==
+
+<syntaxhighlight lang="mermaid">
+graph TD; A-->B;
+</syntaxhighlight>
+
+== Notes ==
+
+<blockquote>
+'''Note:''' Auto-unseal uses Azure Key Vault.
+</blockquote>
+
+<!-- mykb-curator footer run-id=run-1 kb-commit=kb-def456 last-curated=2026-05-15T08:30:00Z -->
