@@ -51,6 +51,7 @@ import (
 	mwbackend "github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends/mediawiki"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/editorial"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/hub"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/projection"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes"
@@ -151,6 +152,7 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 
 	frontendRegistry := frontends.NewRegistry()
 	frontendRegistry.Register(projection.New())
+	frontendRegistry.Register(hub.New()) // deterministic, no LLM — always available
 	if llmClient != nil {
 		frontendRegistry.Register(editorial.New(llmClient, cfg.LLM.Model))
 	}

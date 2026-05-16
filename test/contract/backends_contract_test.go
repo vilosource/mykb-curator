@@ -115,6 +115,7 @@ func BackendContractSuite(t *testing.T, b backends.Backend) {
 				ir.MachineBlock{BlockID: "m1", Body: "body", Prov: ir.Provenance{InputHash: "h"}},
 				ir.KBRefBlock{Area: "vault", ID: "fact:x"},
 				ir.TableBlock{Columns: []string{"a", "b"}, Rows: [][]string{{"1", "2"}}},
+				ir.IndexBlock{Entries: []ir.IndexEntry{{Page: "P", Label: "L", Desc: "d"}}},
 				ir.DiagramBlock{Lang: "mermaid", Source: "graph TD; A-->B;"},
 				ir.Callout{Severity: "note", Body: "callout"},
 				ir.EscapeHatch{Backend: b.Name(), Raw: "raw"},

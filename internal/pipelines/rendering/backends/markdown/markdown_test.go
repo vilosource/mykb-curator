@@ -140,6 +140,31 @@ func TestRender_MarkerBlock_RendersAsHTMLComment(t *testing.T) {
 	}
 }
 
+func TestRender_IndexBlock_RendersLinkList(t *testing.T) {
+	doc := ir.Document{Sections: []ir.Section{{
+		Heading: "Core Infrastructure",
+		Blocks: []ir.Block{ir.IndexBlock{Entries: []ir.IndexEntry{
+			{Page: "OptiscanGroup/Azure_Infrastructure/Networking", Label: "Networking", Desc: "Hub-and-spoke + WG S2S"},
+			{Page: "OptiscanGroup/Azure_Infrastructure/Identity", Label: "Identity"},
+			{Page: "OptiscanGroup/Azure_Infrastructure/DR"},
+		}}},
+	}}}
+	out, err := New().Render(doc)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	s := string(out)
+	if !strings.Contains(s, "- [Networking](OptiscanGroup/Azure_Infrastructure/Networking) — Hub-and-spoke + WG S2S") {
+		t.Errorf("labelled+described entry wrong:\n%s", s)
+	}
+	if !strings.Contains(s, "- [Identity](OptiscanGroup/Azure_Infrastructure/Identity)\n") {
+		t.Errorf("labelled, no-desc entry wrong:\n%s", s)
+	}
+	if !strings.Contains(s, "- [OptiscanGroup/Azure_Infrastructure/DR](OptiscanGroup/Azure_Infrastructure/DR)\n") {
+		t.Errorf("label should default to page when empty:\n%s", s)
+	}
+}
+
 func TestRender_TableBlock_RendersAsMarkdownTable(t *testing.T) {
 	doc := ir.Document{
 		Sections: []ir.Section{{

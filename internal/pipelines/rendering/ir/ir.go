@@ -119,6 +119,26 @@ func (TableBlock) Kind() string             { return "table" }
 func (TableBlock) Zone() Zone               { return ZoneMachine }
 func (b TableBlock) Provenance() Provenance { return b.Prov }
 
+// IndexEntry is one curated internal link in an IndexBlock.
+type IndexEntry struct {
+	Page  string // target wiki page title (internal link)
+	Label string // link text; falls back to Page if empty
+	Desc  string // optional one-line description (may be kb-sourced)
+}
+
+// IndexBlock is a curated list of internal links — the building
+// block of hub / progressive-disclosure index pages. Machine-owned:
+// navigation is structural, always regenerated, never human-polished
+// in place (a human edits the spec, not the rendered list).
+type IndexBlock struct {
+	Entries []IndexEntry
+	Prov    Provenance
+}
+
+func (IndexBlock) Kind() string             { return "index" }
+func (IndexBlock) Zone() Zone               { return ZoneMachine }
+func (b IndexBlock) Provenance() Provenance { return b.Prov }
+
 // DiagramBlock holds diagram source for rendering by the
 // RenderDiagrams pass. Lang selects the renderer (mermaid is the
 // default; plantuml, drawio handled by escape-hatch paths).

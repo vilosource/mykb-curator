@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/vilosource/mykb-curator/internal/adapters/specs"
 )
 
 func TestParse_MinimalValidSpec(t *testing.T) {
@@ -76,6 +78,70 @@ Cover all the Azure infrastructure topics.
 	wantFC := map[string]string{"link_rot": "every-run", "external_truth": "quarterly"}
 	if !reflect.DeepEqual(spec.FactCheck, wantFC) {
 		t.Errorf("FactCheck = %v, want %v", spec.FactCheck, wantFC)
+	}
+}
+
+func TestParse_HubSpec(t *testing.T) {
+	body := `---
+wiki: mykb
+page: OptiscanGroup/Azure_Infrastructure
+kind: hub
+hub:
+  sections:
+    - title: Core Infrastructure
+      links:
+        - page: OptiscanGroup/Azure_Infrastructure/Networking
+          label: Networking
+          desc: Hub-and-spoke + WG S2S
+        - page: OptiscanGroup/Azure_Infrastructure/Vault
+          area: vault
+    - title: Operations
+      links:
+        - page: OptiscanGroup/Azure_Infrastructure/DR
+---
+
+Index of the Azure infrastructure.
+`
+	spec, err := Parse("hub.spec.md", []byte(body))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if spec.Kind != "hub" || spec.Hub == nil {
+		t.Fatalf("hub not parsed: kind=%q hub=%v", spec.Kind, spec.Hub)
+	}
+	if len(spec.Hub.Sections) != 2 {
+		t.Fatalf("sections = %d, want 2", len(spec.Hub.Sections))
+	}
+	s0 := spec.Hub.Sections[0]
+	if s0.Title != "Core Infrastructure" || len(s0.Links) != 2 {
+		t.Fatalf("section0 wrong: %+v", s0)
+	}
+	want := specs.HubLink{Page: "OptiscanGroup/Azure_Infrastructure/Networking", Label: "Networking", Desc: "Hub-and-spoke + WG S2S"}
+	if !reflect.DeepEqual(s0.Links[0], want) {
+		t.Errorf("link0 = %+v, want %+v", s0.Links[0], want)
+	}
+	if s0.Links[1].Area != "vault" {
+		t.Errorf("link1.Area = %q, want vault", s0.Links[1].Area)
+	}
+}
+
+func TestParse_HubValidation(t *testing.T) {
+	cases := map[string]string{
+		"hub kind, no hub block": "wiki: m\npage: P\nkind: hub\n",
+		"hub, empty sections":    "wiki: m\npage: P\nkind: hub\nhub:\n  sections: []\n",
+		"section with no links":  "wiki: m\npage: P\nkind: hub\nhub:\n  sections:\n    - title: T\n",
+		"link missing page":      "wiki: m\npage: P\nkind: hub\nhub:\n  sections:\n    - title: T\n      links:\n        - label: x\n",
+	}
+	for name, fm := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Parse("x.spec.md", []byte("---\n"+fm+"---\n")); err == nil {
+				t.Errorf("expected validation error for %s", name)
+			}
+		})
+	}
+	// A non-hub spec must not require a hub block.
+	if _, err := Parse("p.spec.md", []byte("---\nwiki: m\npage: P\nkind: projection\n---\n")); err != nil {
+		t.Errorf("non-hub spec should not require hub: %v", err)
 	}
 }
 

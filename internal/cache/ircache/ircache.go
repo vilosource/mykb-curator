@@ -47,6 +47,7 @@ func init() {
 	gob.Register(ir.MachineBlock{})
 	gob.Register(ir.KBRefBlock{})
 	gob.Register(ir.TableBlock{})
+	gob.Register(ir.IndexBlock{})
 	gob.Register(ir.DiagramBlock{})
 	gob.Register(ir.Callout{})
 	gob.Register(ir.EscapeHatch{})

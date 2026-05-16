@@ -198,6 +198,27 @@ func TestRender_MarkerBlocks_AreInertHTMLComments(t *testing.T) {
 	}
 }
 
+func TestRender_IndexBlock_IsWikitextLinkList(t *testing.T) {
+	doc := ir.Document{Sections: []ir.Section{{
+		Heading: "Core Infrastructure",
+		Blocks: []ir.Block{ir.IndexBlock{Entries: []ir.IndexEntry{
+			{Page: "OptiscanGroup/Azure_Infrastructure/Networking", Label: "Networking", Desc: "Hub-and-spoke + WG S2S"},
+			{Page: "OptiscanGroup/Azure_Infrastructure/Identity", Label: "Identity"},
+			{Page: "OptiscanGroup/Azure_Infrastructure/DR"},
+		}}},
+	}}}
+	s := string(mustRender(t, doc))
+	if !strings.Contains(s, "* [[OptiscanGroup/Azure_Infrastructure/Networking|Networking]] — Hub-and-spoke + WG S2S\n") {
+		t.Errorf("labelled+described wikitext link wrong:\n%s", s)
+	}
+	if !strings.Contains(s, "* [[OptiscanGroup/Azure_Infrastructure/Identity|Identity]]\n") {
+		t.Errorf("labelled no-desc wrong:\n%s", s)
+	}
+	if !strings.Contains(s, "* [[OptiscanGroup/Azure_Infrastructure/DR]]\n") {
+		t.Errorf("no label ⇒ bare [[Page]] expected:\n%s", s)
+	}
+}
+
 func TestRender_Table_IsWikitextTable(t *testing.T) {
 	doc := ir.Document{Sections: []ir.Section{{
 		Heading: "Inventory",

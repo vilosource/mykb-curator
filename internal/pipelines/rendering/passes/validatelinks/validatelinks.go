@@ -55,6 +55,17 @@ func (v *ValidateLinks) Apply(_ context.Context, doc ir.Document) (ir.Document, 
 	broken := map[string]bool{}
 	for _, sec := range doc.Sections {
 		for _, b := range sec.Blocks {
+			// IndexBlock carries structured internal links (hub /
+			// index pages). Navigation correctness is the whole
+			// point of a hub, so every entry's target must resolve.
+			if ib, ok := b.(ir.IndexBlock); ok {
+				for _, e := range ib.Entries {
+					if t := strings.TrimSpace(e.Page); t != "" && !v.known[t] {
+						broken[t] = true
+					}
+				}
+				continue
+			}
 			text := textOf(b)
 			if text == "" {
 				continue

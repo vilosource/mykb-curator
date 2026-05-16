@@ -105,6 +105,8 @@ func writeBlock(buf *bytes.Buffer, blk ir.Block) {
 		fmt.Fprintf(buf, "[kb:%s/%s]\n\n", b.Area, b.ID)
 	case ir.TableBlock:
 		writeTable(buf, b)
+	case ir.IndexBlock:
+		writeIndex(buf, b)
 	case ir.DiagramBlock:
 		writeDiagram(buf, b)
 	case ir.Callout:
@@ -247,6 +249,25 @@ func writeMarkerBlock(buf *bytes.Buffer, b ir.MarkerBlock) {
 	case ir.MarkerEnd:
 		fmt.Fprintf(buf, "<!-- CURATOR:END block=%s -->\n", b.BlockID)
 	}
+}
+
+// writeIndex renders a curated link list (hub / index pages) as a
+// wikitext bullet list of internal links. `[[Page|Label]]` when a
+// distinct label is given, bare `[[Page]]` otherwise; optional
+// " — Desc" suffix.
+func writeIndex(buf *bytes.Buffer, b ir.IndexBlock) {
+	for _, e := range b.Entries {
+		link := "[[" + e.Page + "]]"
+		if e.Label != "" && e.Label != e.Page {
+			link = "[[" + e.Page + "|" + e.Label + "]]"
+		}
+		if e.Desc != "" {
+			fmt.Fprintf(buf, "* %s — %s\n", link, e.Desc)
+		} else {
+			fmt.Fprintf(buf, "* %s\n", link)
+		}
+	}
+	buf.WriteByte('\n')
 }
 
 func writeTable(buf *bytes.Buffer, b ir.TableBlock) {

@@ -59,6 +59,39 @@ func TestApply_UnknownInternalLink_Errors(t *testing.T) {
 	}
 }
 
+func TestApply_IndexBlock_LinksValidated(t *testing.T) {
+	known := map[string]bool{"OptiscanGroup/Networking": true}
+	// One known target, one ghost — a hub with a broken link must
+	// fail loudly (link-checked navigation is the point of a hub).
+	doc := ir.Document{Sections: []ir.Section{{
+		Heading: "Core",
+		Blocks: []ir.Block{ir.IndexBlock{Entries: []ir.IndexEntry{
+			{Page: "OptiscanGroup/Networking", Label: "Networking"},
+			{Page: "OptiscanGroup/Ghost", Label: "Ghost"},
+		}}},
+	}}}
+	_, err := New(known).Apply(context.Background(), doc)
+	if err == nil || !errors.Is(err, ErrBrokenLinks) {
+		t.Fatalf("broken IndexBlock link must error with ErrBrokenLinks, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "OptiscanGroup/Ghost") {
+		t.Errorf("error should name the broken hub link: %v", err)
+	}
+	if strings.Contains(err.Error(), "OptiscanGroup/Networking") {
+		t.Errorf("known hub link must not be reported broken: %v", err)
+	}
+}
+
+func TestApply_IndexBlock_AllKnown_OK(t *testing.T) {
+	known := map[string]bool{"A": true, "B": true}
+	doc := ir.Document{Sections: []ir.Section{{
+		Blocks: []ir.Block{ir.IndexBlock{Entries: []ir.IndexEntry{{Page: "A"}, {Page: "B"}}}},
+	}}}
+	if _, err := New(known).Apply(context.Background(), doc); err != nil {
+		t.Errorf("all hub links known ⇒ no error, got %v", err)
+	}
+}
+
 func TestApply_PipedLink_ChecksTarget(t *testing.T) {
 	// [[Target|display]] — pipe-aliased link; target is what we
 	// validate.

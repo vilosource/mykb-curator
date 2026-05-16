@@ -326,8 +326,8 @@ This split is what makes the curator both *intelligent enough to be useful* and 
 |---|---|---|
 | `ProjectionFrontend` | Projection spec (area + workspace include list) | Reads area + linked workspaces, surfaces workspace-only knowledge as "candidate-for-promotion" sections, renders facts/decisions/gotchas/patterns by type, dedupes obvious near-duplicates. May be deterministic or LLM-augmented depending on spec opt-ins. |
 | `EditorialFrontend` | Editorial spec (intent: sections, topics, sources, style) | LLM-driven by default. Reads declared sources, exercises editorial judgement, produces a structured IR matching the spec's section outline, writes connective prose. |
-| `HubFrontend` | Hub spec (an index page over other pages) | Often deterministic — enumerate child pages, render links, generate sidebar from spec config. Editorial flourishes (intro paragraph, sidebar grouping) optionally LLM. |
-| `RunbookFrontend` | Runbook spec (procedural pages) | Specialised: enforces step/check/rollback structure; rejects IR that doesn't conform. Mostly deterministic. |
+| `HubFrontend` | Hub spec (an index page over other pages) | **✓ built (2026-05-16)** — fully deterministic, no LLM. `hub.sections` → `ir.IndexBlock` of internal links; a link's description falls back to its kb `area:` summary so the index stays fresh from the brain; an optional intro paragraph from spec body. Link targets are checked by ValidateLinks (broken nav fails the run). |
+| `RunbookFrontend` | Runbook spec (procedural pages) | Specialised: enforces step/check/rollback structure; rejects IR that doesn't conform. Mostly deterministic. **Status: NOT built — `kind: runbook` is accepted by the parser but no RunbookFrontend is registered; a runbook spec fails "no frontend registered for kind runbook". Tracked §17.** |
 | Future | | Open registry; new spec kinds plug in here. |
 
 **Spec is intent, not blueprint.** Example editorial spec:
@@ -374,6 +374,7 @@ Stable, structured, backend-agnostic tree. Two top-level concerns:
 | `MachineBlock` | Auto-generated structural content with a render-fn (e.g. table of areas). | Machine-owned — always regenerated. |
 | `KBRefBlock` | Reference to a specific kb entry (`kb:fact:abc123`). Render mode varies (inline, footnote, link). | Machine-owned. |
 | `TableBlock` | Structured table generated from kb query. | Machine-owned. |
+| `IndexBlock` | Curated list of internal links (page/label/desc) — the building block of hub/index pages. | Machine-owned (navigation is structural, always regenerated; a human edits the spec, not the rendered list). |
 | `DiagramBlock` | Mermaid/PlantUML/draw.io source + asset reference. Rendered by a pass. | Machine-owned (regenerate from source on every run; upload only if source changed). |
 | `Callout` | Note/warning/info box. | Inherits zone from authorship (LLM-prose = editorial; spec-fixed = machine). |
 | `EscapeHatch` | Backend-specific raw markup. Lossy across backends. | Machine-owned. Logged on every render. |
@@ -1081,8 +1082,24 @@ The numbered milestones below were the original sequencing plan; status is updat
   lying report was a real defect — gated out of v1.0. Regression:
   `TestScenario_IdempotentUpsert_NotReportedFailed` (real MediaWiki
   L4, double identical upsert must succeed).
+- ✓ (landed 2026-05-16) Hub frontend + `ir.IndexBlock`: deterministic
+  index/hub pages (the navigation backbone of progressive-disclosure
+  wikis). `hub.sections` → `IndexBlock` of internal links; link
+  descriptions fall back to the linked kb area's summary (index stays
+  fresh from the brain); optional intro from spec body; targets
+  link-validated by ValidateLinks (broken nav fails the run).
+  IndexBlock rendered by both backends (markdown + wikitext),
+  gob-cached, in the backends contract. Closes the
+  "`kind: hub` accepted-but-unbuilt" gap.
 
 ### Not yet
+
+- **RunbookFrontend not built.** `kind: runbook` is accepted by the
+  parser but no RunbookFrontend is registered — a runbook spec fails
+  "no frontend registered for kind runbook". Same accepted-but-unbuilt
+  shape the hub frontend just closed; recorded here so it is not
+  implied-done by omission. Build when procedural runbook pages are
+  needed.
 
 _Nothing blocking v1.0. Remaining items are deferred-with-a-plan:_
 see the v2+ backlog below (Judge Agent quality loop, real

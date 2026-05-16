@@ -55,6 +55,19 @@ type frontmatter struct {
 	Include         includeYAML       `yaml:"include"`
 	FactCheck       map[string]string `yaml:"fact_check"`
 	ProtectedBlocks []string          `yaml:"protected_blocks"`
+	Hub             *hubYAML          `yaml:"hub"`
+}
+
+type hubYAML struct {
+	Sections []struct {
+		Title string `yaml:"title"`
+		Links []struct {
+			Page  string `yaml:"page"`
+			Label string `yaml:"label"`
+			Desc  string `yaml:"desc"`
+			Area  string `yaml:"area"`
+		} `yaml:"links"`
+	} `yaml:"sections"`
 }
 
 type includeYAML struct {
@@ -120,9 +133,29 @@ func Parse(id string, content []byte) (specs.Spec, error) {
 			ExcludeZones: f.Include.ExcludeZones,
 		},
 		FactCheck: f.FactCheck,
+		Hub:       toHubSpec(f.Hub),
 		Body:      string(body),
 		Hash:      hashContent(content),
 	}, nil
+}
+
+// toHubSpec maps the YAML hub block onto the public spec model.
+// Returns nil when absent so non-hub specs carry no hub structure.
+func toHubSpec(h *hubYAML) *specs.HubSpec {
+	if h == nil {
+		return nil
+	}
+	hs := &specs.HubSpec{}
+	for _, sec := range h.Sections {
+		s := specs.HubSection{Title: sec.Title}
+		for _, l := range sec.Links {
+			s.Links = append(s.Links, specs.HubLink{
+				Page: l.Page, Label: l.Label, Desc: l.Desc, Area: l.Area,
+			})
+		}
+		hs.Sections = append(hs.Sections, s)
+	}
+	return hs
 }
 
 // splitFrontmatter separates a "---\n…\n---\nbody" pair into
@@ -170,6 +203,21 @@ func validateFrontmatter(f *frontmatter) error {
 	}
 	if !knownKinds[f.Kind] {
 		return fmt.Errorf("kind: %q unknown (known: projection, editorial, hub, runbook)", f.Kind)
+	}
+	if f.Kind == "hub" {
+		if f.Hub == nil || len(f.Hub.Sections) == 0 {
+			return fmt.Errorf("hub: kind=hub requires a non-empty hub.sections")
+		}
+		for i, s := range f.Hub.Sections {
+			if len(s.Links) == 0 {
+				return fmt.Errorf("hub.sections[%d] (%q): has no links", i, s.Title)
+			}
+			for j, l := range s.Links {
+				if l.Page == "" {
+					return fmt.Errorf("hub.sections[%d].links[%d]: page is required", i, j)
+				}
+			}
+		}
 	}
 	return nil
 }

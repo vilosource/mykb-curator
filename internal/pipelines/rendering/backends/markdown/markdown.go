@@ -101,6 +101,8 @@ func writeBlock(buf *bytes.Buffer, blk ir.Block) {
 		writeKBRef(buf, b)
 	case ir.TableBlock:
 		writeTable(buf, b)
+	case ir.IndexBlock:
+		writeIndex(buf, b)
 	case ir.DiagramBlock:
 		writeDiagram(buf, b)
 	case ir.Callout:
@@ -148,6 +150,24 @@ func writeKBRef(buf *bytes.Buffer, b ir.KBRefBlock) {
 	// includes both area and id so the unresolved reference is
 	// readable in raw markdown.
 	fmt.Fprintf(buf, "[kb:%s/%s]\n", b.Area, b.ID)
+}
+
+// writeIndex renders a curated link list (hub / index pages). Each
+// entry is a markdown link, optionally followed by a one-line
+// description. Label defaults to the page title.
+func writeIndex(buf *bytes.Buffer, b ir.IndexBlock) {
+	for _, e := range b.Entries {
+		label := e.Label
+		if label == "" {
+			label = e.Page
+		}
+		if e.Desc != "" {
+			fmt.Fprintf(buf, "- [%s](%s) — %s\n", label, e.Page, e.Desc)
+		} else {
+			fmt.Fprintf(buf, "- [%s](%s)\n", label, e.Page)
+		}
+	}
+	buf.WriteByte('\n')
 }
 
 func writeTable(buf *bytes.Buffer, b ir.TableBlock) {

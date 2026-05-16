@@ -46,6 +46,33 @@ type Spec struct {
 
 	// Hash is the content hash of the spec; used in cache keys.
 	Hash string
+
+	// Hub is the declared index structure for kind=hub specs (nil
+	// otherwise). Drives the deterministic hub frontend — the
+	// navigation backbone of progressive-disclosure wikis.
+	Hub *HubSpec
+}
+
+// HubSpec is the declared structure of an index/hub page: ordered
+// sections, each an ordered list of internal links.
+type HubSpec struct {
+	Sections []HubSection
+}
+
+// HubSection is one labelled group of links on a hub page.
+type HubSection struct {
+	Title string
+	Links []HubLink
+}
+
+// HubLink is one curated internal link on a hub page.
+type HubLink struct {
+	Page  string // target wiki page title (required)
+	Label string // link text; defaults to Page
+	Desc  string // optional one-line description
+	Area  string // optional kb area id; if set and Desc is empty,
+	// the hub frontend fills Desc from that area's
+	// summary so the index stays fresh from the brain
 }
 
 // IncludeFilter declares which subset of the kb a spec is allowed
