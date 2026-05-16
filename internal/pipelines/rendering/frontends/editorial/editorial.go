@@ -23,6 +23,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/adapters/specs"
 	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/mdir"
 )
 
 // Frontend is the editorial-mode (LLM-driven) frontend.
@@ -70,7 +71,7 @@ func (f *Frontend) Build(ctx context.Context, spec specs.Spec, snap kb.Snapshot)
 			SpecHash: spec.Hash,
 			KBCommit: snap.Commit,
 		},
-		Sections: parseMarkdown(resp.Text, spec.Hash),
+		Sections: mdir.Parse(resp.Text, "editorial", spec.Hash),
 	}, nil
 }
 
@@ -132,110 +133,6 @@ func composePrompt(spec specs.Spec, snap kb.Snapshot) string {
 	return sb.String()
 }
 
-// parseMarkdown splits LLM output into IR sections by scanning for
-// `## ` headings. Content before the first heading becomes a single
-// no-heading section so prose isn't dropped.
-func parseMarkdown(md, specHash string) []ir.Section {
-	lines := strings.Split(md, "\n")
-	var sections []ir.Section
-	var current ir.Section
-	var buf strings.Builder
-	flush := func() {
-		text := strings.TrimSpace(buf.String())
-		if text != "" {
-			current.Blocks = append(current.Blocks, ir.ProseBlock{
-				Text: text,
-				Prov: ir.Provenance{
-					SpecSection: "editorial-section",
-					InputHash:   specHash,
-				},
-			})
-		}
-		buf.Reset()
-	}
-	startSection := func(heading string) {
-		flush()
-		if current.Heading != "" || len(current.Blocks) > 0 {
-			sections = append(sections, current)
-		}
-		current = ir.Section{Heading: heading}
-	}
-
-	inFence := false
-	fenceLang := ""
-	var fenceBuf strings.Builder
-	addDiagram := func() {
-		current.Blocks = append(current.Blocks, ir.DiagramBlock{
-			Lang:   fenceLang,
-			Source: strings.TrimRight(fenceBuf.String(), "\n"),
-			Prov:   ir.Provenance{SpecSection: "editorial-diagram", InputHash: specHash},
-		})
-		fenceBuf.Reset()
-		fenceLang = ""
-	}
-
-	for _, line := range lines {
-		// Fenced code blocks → DiagramBlock. ```mermaid is rendered
-		// to an image + uploaded by the RenderDiagrams pass; any
-		// other language falls through that pass (ErrUnsupportedLang)
-		// and the backend renders it as <syntaxhighlight>. Either
-		// way the fence never leaks into prose as literal text.
-		if strings.HasPrefix(line, "```") {
-			if inFence {
-				addDiagram()
-				inFence = false
-			} else {
-				flush() // emit prose accumulated before the fence
-				fenceLang = strings.TrimSpace(strings.TrimPrefix(line, "```"))
-				if fenceLang == "" {
-					fenceLang = "text" // not mermaid → syntaxhighlight path
-				}
-				inFence = true
-			}
-			continue
-		}
-		if inFence {
-			fenceBuf.WriteString(line)
-			fenceBuf.WriteByte('\n')
-			continue
-		}
-
-		// Any ATX heading (## … ######) starts a section. LLMs don't
-		// reliably restrict themselves to ## despite the system
-		// prompt; treating only ## as a boundary leaked "### Foo"
-		// markdown verbatim into prose (and thence as broken
-		// wikitext). Hierarchy is flattened — the IR Section model is
-		// flat — which is acceptable and far better than leaked
-		// markup; preserving depth is a future IR change.
-		if h, ok := atxHeading(line); ok {
-			startSection(h)
-			continue
-		}
-		buf.WriteString(line)
-		buf.WriteByte('\n')
-	}
-	if inFence { // unclosed fence — don't lose the content
-		addDiagram()
-	}
-	flush()
-	if current.Heading != "" || len(current.Blocks) > 0 {
-		sections = append(sections, current)
-	}
-	return sections
-}
-
-// atxHeading reports whether line is a markdown ATX heading of level
-// 2–6 (## … ######) and, if so, returns the trimmed heading text.
-// Level 1 (#) is intentionally not a section boundary — the page
-// title is set separately and the system prompt forbids #.
-func atxHeading(line string) (string, bool) {
-	s := strings.TrimRight(line, " \t")
-	n := 0
-	for n < len(s) && s[n] == '#' {
-		n++
-	}
-	if n < 2 || n > 6 || n >= len(s) || s[n] != ' ' {
-		return "", false
-	}
-	return strings.TrimSpace(s[n+1:]), true
-}
+// Markdown→IR parsing now lives in the shared mdir package (reused
+// by every LLM-driven frontend). editorial keeps its provenance
+// label via the "editorial" prefix.
