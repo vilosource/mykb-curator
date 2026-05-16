@@ -1027,7 +1027,15 @@ The numbered milestones below were the original sequencing plan; status is updat
   run (pages already shipped); fires on success AND failed runs.
   Verified L1 (each sink + MultiSink fan-out/best-effort) + L2
   (three real sinks through real MultiSink, cross-package).
-- Per-wiki lock + atomicity hardening (currently nothing prevents two concurrent runs against the same wiki)
+- ✓ (landed 2026-05-16) Per-wiki lock + atomicity hardening:
+  `internal/lock` advisory lock via `flock(2)` LOCK_EX|LOCK_NB on a
+  per-wiki lockfile (in the wiki's cache dir). The composition root
+  acquires it before any work and fails fast with a clear message if
+  another run for the same wiki is active — no queueing (right for a
+  scheduled tool). Kernel releases the flock on process exit ⇒ no
+  stale-lock heuristics. Verified L1 (round-trip, second-blocked,
+  independent paths, 16-goroutine race under `-race`: exactly one
+  holder) + L2 (concurrent-runs-rejected scenario).
 - Spec authoring guide + CONTRIBUTING.md
 
 **v2+ — Extensibility**

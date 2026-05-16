@@ -15,6 +15,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/smtp"
@@ -38,6 +39,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/cache/runstate"
 	"github.com/vilosource/mykb-curator/internal/config"
 	"github.com/vilosource/mykb-curator/internal/llm"
+	"github.com/vilosource/mykb-curator/internal/lock"
 	"github.com/vilosource/mykb-curator/internal/orchestrator"
 	"github.com/vilosource/mykb-curator/internal/pipelines/maintenance"
 	"github.com/vilosource/mykb-curator/internal/pipelines/maintenance/checks/externaltruth"
@@ -115,6 +117,18 @@ func newRunCmd() *cobra.Command {
 // Any spec-store type other than "local" returns a clear error so
 // the user knows what's implemented vs not.
 func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir string) error {
+	// Per-wiki mutual exclusion: refuse to start if another run is
+	// already operating on this wiki (DESIGN §17 v1.0). Fail fast —
+	// queueing a second concurrent curator run is never desirable.
+	wikiLock, err := lock.Acquire(wikiLockPath(cfg))
+	if err != nil {
+		if errors.Is(err, lock.ErrLocked) {
+			return fmt.Errorf("another mykb-curator run is already active for wiki %q; refusing to run concurrently", cfg.Wiki)
+		}
+		return err
+	}
+	defer func() { _ = wikiLock.Release() }()
+
 	specStore, err := composeSpecStore(cfg)
 	if err != nil {
 		return err
@@ -482,6 +496,23 @@ func kbWorkDir(cfg *config.Config) string {
 		return filepath.Join(cfg.CacheDir, "kb-clone")
 	}
 	return filepath.Join(os.Getenv("HOME"), ".cache", "mykb-curator", cfg.Wiki, "kb-clone")
+}
+
+// wikiLockPath is the per-wiki advisory lockfile path. It lives next
+// to the wiki's cache so it shares the wiki's isolation boundary;
+// the kernel releases the flock on process exit (no stale locks).
+func wikiLockPath(cfg *config.Config) string {
+	base := cfg.CacheDir
+	if base == "" {
+		base = filepath.Join(os.Getenv("HOME"), ".cache", "mykb-curator", cfg.Wiki)
+	}
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		// Fall back to the system temp dir keyed by wiki — still gives
+		// mutual exclusion, just not co-located with the cache.
+		base = filepath.Join(os.TempDir(), "mykb-curator-"+cfg.Wiki)
+		_ = os.MkdirAll(base, 0o700)
+	}
+	return filepath.Join(base, "curator.lock")
 }
 
 // newRunID returns a short hex id, matching the orchestrator's own
