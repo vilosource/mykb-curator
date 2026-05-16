@@ -10,21 +10,26 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/vilosource/mykb-curator/internal/adapters/docspecs"
 	"github.com/vilosource/mykb-curator/internal/adapters/kb"
 	"github.com/vilosource/mykb-curator/internal/adapters/specs"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki"
 	"github.com/vilosource/mykb-curator/internal/cache/ircache"
 	"github.com/vilosource/mykb-curator/internal/cache/runstate"
+	"github.com/vilosource/mykb-curator/internal/judge"
 	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/pipelines/maintenance"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/cluster"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/reconciler"
 	"github.com/vilosource/mykb-curator/internal/reporter"
+	"github.com/vilosource/mykb-curator/internal/specs/docspec"
 )
 
 // Deps holds every collaborator the orchestrator needs. The
@@ -101,6 +106,20 @@ type Deps struct {
 	// recorded on the run report but do not fail the overall run —
 	// the curated pages have already shipped.
 	OnMaintenance func(proposals []maintenance.MutationProposal) error
+
+	// DocSpecs + Cluster wire the SDD-for-docs path: one *.doc.yaml
+	// topic → a cross-linked parent+children cluster. Both optional;
+	// absent = no docspec path (legacy *.spec.md unaffected). Cluster
+	// requires the architecture frontend (LLM-backed), so the
+	// composition root only wires these when an LLM is present.
+	DocSpecs docspecs.Store
+	Cluster  *cluster.Cluster
+
+	// Judge is the report-only output reviewer. When set, every
+	// rendered cluster page is reviewed against its declared intent
+	// and the verdict is surfaced on the run report. It NEVER blocks
+	// a push — a failing verdict is a warning, not a failure.
+	Judge *judge.Judge
 }
 
 // Orchestrator drives one curator run end-to-end.
@@ -161,9 +180,126 @@ func (o *Orchestrator) Run(ctx context.Context) (reporter.Report, error) {
 		rb.AddSpecResult(o.processSpec(ctx, s, snap, passPipeline))
 	}
 
+	o.runDocSpecs(ctx, snap, passPipeline, rb)
+
 	o.runMaintenance(ctx, snap, rb)
 
 	return rb.Build(), nil
+}
+
+// runDocSpecs renders every *.doc.yaml cluster: one topic → a
+// parent page + N cross-linked children. Each rendered page reuses
+// the proven passes → backend → reconcile/push tail via a synthetic
+// per-page spec. The Judge (when wired) reviews each page before
+// push but is report-only — its verdict never blocks the upsert.
+//
+// Optional: absent DocSpecs/Cluster wiring is a silent no-op so
+// legacy-only deployments are unaffected.
+func (o *Orchestrator) runDocSpecs(ctx context.Context, snap kb.Snapshot, passPipeline *passes.Pipeline, rb *reporter.Builder) {
+	if o.deps.DocSpecs == nil || o.deps.Cluster == nil {
+		return
+	}
+	files, err := o.deps.DocSpecs.Pull(ctx)
+	if err != nil {
+		rb.AddError(fmt.Errorf("docspecs pull: %w", err))
+		return
+	}
+	for _, f := range files {
+		pages, err := o.deps.Cluster.Render(ctx, f.Spec, snap)
+		if err != nil {
+			rb.AddSpecResult(reporter.SpecResult{
+				ID:     f.ID,
+				Status: reporter.StatusFailed,
+				Reason: fmt.Errorf("cluster render: %w", err).Error(),
+			})
+			continue
+		}
+		byTitle := docPagesByTitle(f.Spec)
+		for _, p := range pages {
+			rb.AddSpecResult(o.processClusterPage(ctx, f.ID, p, byTitle[p.Page], snap, passPipeline, rb))
+		}
+	}
+}
+
+// processClusterPage runs one cluster page through passes + backend,
+// reviews it with the Judge (report-only), then reconciles + pushes
+// it under a synthetic per-page spec ID so run-state + human-edit
+// detection work exactly as for legacy specs.
+func (o *Orchestrator) processClusterPage(ctx context.Context, dsID string, p cluster.RenderedPage, page docspec.DocPage, snap kb.Snapshot, passPipeline *passes.Pipeline, rb *reporter.Builder) reporter.SpecResult {
+	id := dsID + "::" + p.Page
+	doc := p.Doc
+
+	var err error
+	if passPipeline != nil {
+		doc, err = passPipeline.Apply(ctx, doc)
+		if err != nil {
+			return reporter.SpecResult{ID: id, Status: reporter.StatusFailed, Reason: err.Error()}
+		}
+	}
+
+	// Judge BEFORE push — report-only. A failing or inconclusive
+	// verdict is a warning on the report, never a push gate.
+	if o.deps.Judge != nil && page.Page != "" {
+		if rep, jerr := o.deps.Judge.Review(ctx, page, doc); jerr != nil {
+			rb.AddWarning(fmt.Sprintf("judge %q: %v", p.Page, jerr))
+		} else if !rep.AllPass() {
+			rb.AddWarning(fmt.Sprintf("judge %q: %s", p.Page, summariseVerdicts(rep)))
+		}
+	}
+
+	if o.deps.Backend == nil || o.deps.WikiTarget == nil {
+		return reporter.SpecResult{ID: id, Status: reporter.StatusRendered, BlocksRegenerated: countBlocks(doc)}
+	}
+	rendered, err := o.deps.Backend.Render(doc)
+	if err != nil {
+		return reporter.SpecResult{ID: id, Status: reporter.StatusFailed, Reason: fmt.Errorf("backend %s: %w", o.deps.Backend.Name(), err).Error()}
+	}
+
+	synthetic := specs.Spec{ID: id, Page: p.Page, Wiki: o.deps.Wiki}
+	pr, err := o.reconcileAndPush(ctx, synthetic, rendered, snap.Commit)
+	if err != nil {
+		return reporter.SpecResult{ID: id, Status: reporter.StatusFailed, Reason: err.Error()}
+	}
+	res := reporter.SpecResult{
+		ID:                id,
+		Status:            reporter.StatusRendered,
+		BlocksRegenerated: countBlocks(doc),
+		HumanEdits:        pr.HumanEdits,
+		NewRevisionID:     pr.NewRevisionID,
+	}
+	if pr.NoOp {
+		res.Status = reporter.StatusSkipped
+		res.Reason = "no content change since last bot revision"
+	}
+	if o.deps.OnRendered != nil {
+		if err := o.deps.OnRendered(id, rendered, doc); err != nil {
+			return reporter.SpecResult{ID: id, Status: reporter.StatusFailed, Reason: err.Error()}
+		}
+	}
+	return res
+}
+
+func docPagesByTitle(s docspec.DocSpec) map[string]docspec.DocPage {
+	m := map[string]docspec.DocPage{s.Parent.Page: s.Parent}
+	for _, c := range s.Children {
+		m[c.Page] = c
+	}
+	return m
+}
+
+func summariseVerdicts(r judge.Report) string {
+	var b strings.Builder
+	for _, v := range r.Verdicts {
+		if v.Pass && !v.Inconclusive {
+			continue
+		}
+		state := "FAIL"
+		if v.Inconclusive {
+			state = "INCONCLUSIVE"
+		}
+		fmt.Fprintf(&b, "[%s %s: %s] ", state, v.Section, v.Reason)
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // runMaintenance executes the maintenance pipeline if configured.

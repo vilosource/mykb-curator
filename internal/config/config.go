@@ -22,6 +22,24 @@ type Config struct {
 	CacheDir    string            `yaml:"cache_dir"`
 	Style       StyleConfig       `yaml:"style"`
 	Sinks       SinksConfig       `yaml:"report_sinks"`
+	Sources     SourcesConfig     `yaml:"sources"`
+}
+
+// SourcesConfig configures the non-kb doc-spec source resolvers
+// (the reality-probe family). Only git ships today; it is read-only
+// and offline so it needs no policy gate. cmd/ssh/az are deferred
+// behind an execution-policy model and have no config here yet.
+type SourcesConfig struct {
+	Git GitSourcesConfig `yaml:"git"`
+}
+
+// GitSourcesConfig locates local clones for the read-only git:
+// resolver. Root is a base dir containing clones (e.g. ~/GitLab);
+// Repos is an explicit name→path override. Both optional; absent =
+// git: sources stay the honest "pending" placeholder.
+type GitSourcesConfig struct {
+	Root  string            `yaml:"root"`
+	Repos map[string]string `yaml:"repos"`
 }
 
 // SinksConfig configures the optional run-report sinks. Every field

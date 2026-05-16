@@ -27,6 +27,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	docspecslocalfs "github.com/vilosource/mykb-curator/internal/adapters/docspecs/localfs"
 	kbpkg "github.com/vilosource/mykb-curator/internal/adapters/kb"
 	kbgit "github.com/vilosource/mykb-curator/internal/adapters/kb/git"
 	kblocal "github.com/vilosource/mykb-curator/internal/adapters/kb/local"
@@ -38,6 +39,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/cache/ircache"
 	"github.com/vilosource/mykb-curator/internal/cache/runstate"
 	"github.com/vilosource/mykb-curator/internal/config"
+	"github.com/vilosource/mykb-curator/internal/judge"
 	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/lock"
 	"github.com/vilosource/mykb-curator/internal/orchestrator"
@@ -49,7 +51,9 @@ import (
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends/markdown"
 	mwbackend "github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends/mediawiki"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/cluster"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/architecture"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/editorial"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/hub"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/projection"
@@ -62,6 +66,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes/zonemarkers"
 	"github.com/vilosource/mykb-curator/internal/reporter"
 	"github.com/vilosource/mykb-curator/internal/reporter/sinks"
+	gitsrc "github.com/vilosource/mykb-curator/internal/sources/git"
 )
 
 var (
@@ -188,7 +193,22 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 
 	maintPipeline, onMaint := composeMaintenance(cfg, specStore, llmClient)
 
-	orch := orchestrator.New(orchestrator.Deps{
+	// SDD-for-docs path: a *.doc.yaml topic → a cross-linked cluster.
+	// Needs an LLM (the architecture frontend synthesises prose) and
+	// a local spec dir to discover *.doc.yaml in. Absent either, the
+	// docspec path is simply not wired (legacy specs unaffected).
+	var docSpecStore *docspecslocalfs.Store
+	var clusterRenderer *cluster.Cluster
+	var outputJudge *judge.Judge
+	if llmClient != nil && cfg.SpecStore.Type == "local" && cfg.SpecStore.Repo != "" {
+		gitResolver := gitsrc.New(cfg.Sources.Git.Root, cfg.Sources.Git.Repos)
+		archFrontend := architecture.New(llmClient, cfg.LLM.Model, gitResolver)
+		clusterRenderer = cluster.New(archFrontend)
+		docSpecStore = docspecslocalfs.New(cfg.SpecStore.Repo)
+		outputJudge = judge.New(llmClient, cfg.LLM.Model)
+	}
+
+	deps := orchestrator.Deps{
 		Wiki:          cfg.Wiki,
 		KB:            kbSrc,
 		Specs:         specStore,
@@ -202,7 +222,17 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 		IRCache:       irCache,
 		Maintenance:   maintPipeline,
 		OnMaintenance: onMaint,
-	})
+	}
+	// Only assign the docspec interface fields when concretely wired:
+	// assigning a typed nil pointer to an interface field yields a
+	// non-nil interface (Go's nil-interface trap) and would defeat
+	// the orchestrator's nil guard.
+	if clusterRenderer != nil {
+		deps.DocSpecs = docSpecStore
+		deps.Cluster = clusterRenderer
+		deps.Judge = outputJudge
+	}
+	orch := orchestrator.New(deps)
 
 	sink := composeReportSinks(cfg)
 
