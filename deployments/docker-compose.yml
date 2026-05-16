@@ -1,0 +1,51 @@
+# mykb-curator experiment harness — MediaWiki + Pi agent together.
+#
+# `make harness-up` brings up:
+#   - mediawiki   on http://localhost:8181  (Admin / adminpassword-9999)
+#   - pi-harness  on http://localhost:8182  (the curator's PiClient
+#                 target; speaks the /complete shim contract)
+#
+# Then run the curator from the host against both, e.g.:
+#   ./bin/mykb-curator run --wiki acme --config <cfg> \
+#       # cfg: wiki_target.url=http://localhost:8181/api.php
+#       #      llm.provider=pi  llm.endpoint=http://localhost:8182
+#
+# Pi needs a provider key — pass one through the environment before
+# `make harness-up` (only one is required):
+#   export GEMINI_API_KEY=...   # or ANTHROPIC_API_KEY / OPENAI_API_KEY
+#
+# Tear down with `make harness-down` (-v drops the wiki volume).
+
+services:
+  mediawiki:
+    build:
+      context: ./mediawiki
+      dockerfile: Dockerfile
+    image: mykb-curator/test-mediawiki:dev
+    container_name: mykb-curator-mediawiki
+    ports:
+      - "8181:80"
+    environment:
+      MW_SERVER: "http://localhost:8181"
+    volumes:
+      - mediawiki-data:/var/www/data
+
+  pi-harness:
+    build:
+      context: ..
+      dockerfile: deployments/pi-harness/Dockerfile
+    image: mykb-curator/pi-harness:dev
+    container_name: mykb-curator-pi-harness
+    ports:
+      - "8182:8080"
+    environment:
+      # Pass through whichever provider key is set on the host; pi
+      # picks the provider from the --model "provider/id" the curator
+      # config pins. Unset keys are simply empty.
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_BASE_URL: "${OPENAI_BASE_URL:-}"
+
+volumes:
+  mediawiki-data:

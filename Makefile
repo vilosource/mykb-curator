@@ -8,10 +8,12 @@
 
 GO ?= go
 GOLANGCI_LINT ?= golangci-lint
+COMPOSE ?= docker compose
+HARNESS_COMPOSE ?= deployments/docker-compose.yml
 
 PKG ?= ./...
 
-.PHONY: help check build test test-unit test-integration test-contract test-scenario test-all lint fmt vet tidy clean
+.PHONY: help check build test test-unit test-integration test-contract test-scenario test-all lint fmt vet tidy clean harness-up harness-down
 
 help:
 	@echo "Targets:"
@@ -24,7 +26,9 @@ help:
 	@echo "  test-scenario     — add pyramid level 4 (//go:build scenario)"
 	@echo "  test-all          — all pyramid levels"
 	@echo "  lint              — golangci-lint run"
-	@echo "  fmt               — gofmt -w ."
+	@echo "  fmt               — gofmt -w . (covers build-tagged files)"
+	@echo "  harness-up        — build+run MediaWiki+pi-harness (experiment loop)"
+	@echo "  harness-down      — tear the harness down (-v)"
 	@echo "  vet               — go vet ./..."
 	@echo "  tidy              — go mod tidy"
 	@echo "  clean             — rm -rf ./bin"
@@ -56,7 +60,15 @@ lint:
 	$(GOLANGCI_LINT) run
 
 fmt:
-	$(GO) fmt $(PKG)
+	gofmt -w .
+
+harness-up:
+	$(COMPOSE) -f $(HARNESS_COMPOSE) up -d --build
+	@echo "mediawiki  → http://localhost:8181  (Admin / adminpassword-9999)"
+	@echo "pi-harness → http://localhost:8182"
+
+harness-down:
+	$(COMPOSE) -f $(HARNESS_COMPOSE) down -v
 
 vet:
 	$(GO) vet $(PKG)
