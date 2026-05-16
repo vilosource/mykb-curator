@@ -49,7 +49,16 @@ Status legend: **OPEN** (not yet discussed) · **DISCUSSING** ·
    markers exist but are not enforcement. — **OPEN**
 3. **Source-of-truth discipline (behavioural, not tooling).** The
    model only works if the team writes knowledge to mykb, not the
-   wiki; otherwise the curator amplifies a stale brain. — **OPEN**
+   wiki; otherwise the curator amplifies a stale brain. —
+   **RESOLVED** (2026-05-16): accepted model — page genesis =
+   human+agent architect the page AND backfill knowledge into mykb
+   (always step 0, intrinsic to authoring, not a separate project);
+   mykb-curator's page pipeline keeps the wiki a projection;
+   mykb's built-in freshness/validity metadata + the maintenance
+   pipeline (staleness/link-rot/external-truth → MutationProposal →
+   PR, nightly) self-curate the brain. Human role = architect new
+   pages + review proposals; NOT a manual brain-curator. The
+   "backfill might be a surprise project" concern is dissolved.
 4. **Brain-vs-reality drift.** Keeping the wiki consistent with the
    brain ≠ keeping the brain consistent with reality; the
    fact-checking agent (§2) targets this. — **OPEN**
@@ -86,5 +95,27 @@ Status legend: **OPEN** (not yet discussed) · **DISCUSSING** ·
 
 ## 4. Discussion log
 
-(Append dated notes here as each issue is discussed; update the
-status + Resolution line above.)
+### 2026-05-16 — Issue #3 (source-of-truth discipline) — RESOLVED
+
+Adoption model agreed: every curated wiki page starts with a
+human+agent **architecting pass that also backfills the knowledge
+into mykb**; from then on mykb-curator's page pipeline keeps the
+wiki a projection of the brain. Brain freshness is itself
+automated, by original design: `kb.Entry` carries
+`Zone`/`Created`/`Updated`/`Provenance.Status`
+(verified|unverified); the maintenance pipeline (StalenessCheck,
+LinkRotCheck, ExternalTruthCheck) already turns that into
+MutationProposals → PR via prbackend, intended to run nightly. So
+the brain self-curates; the human architects new pages + reviews
+proposals.
+
+Two corrections recorded for faithfulness:
+- The earlier "Vault demo proves a brain-vs-wiki richness gap"
+  claim is **withdrawn**: that demo ran against the synthetic
+  `test/fixtures/kb/acme` fixture (deliberately ~3 facts), never
+  the real `~/.mykb`; it is not evidence about the real brain.
+- The "human becomes the brain-curator" framing was **wrong**:
+  brain curation is the maintenance pipeline's job (built, v1.0),
+  not a new manual human burden. Adoption *relocates* effort to
+  page-architecting + proposal review, and shrinks it further as
+  the maintenance/Judge/reality-probe loops mature.
