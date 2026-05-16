@@ -73,6 +73,10 @@ Cover all the Azure infrastructure topics.
 	if got := spec.Include.ExcludeZones; !reflect.DeepEqual(got, []string{"incoming", "archived"}) {
 		t.Errorf("ExcludeZones = %v", got)
 	}
+	wantFC := map[string]string{"link_rot": "every-run", "external_truth": "quarterly"}
+	if !reflect.DeepEqual(spec.FactCheck, wantFC) {
+		t.Errorf("FactCheck = %v, want %v", spec.FactCheck, wantFC)
+	}
 }
 
 func TestParse_HashStableAndDifferentiating(t *testing.T) {

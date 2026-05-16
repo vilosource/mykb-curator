@@ -34,6 +34,12 @@ type Spec struct {
 	// Include declares the kb subset this spec is allowed to read.
 	Include IncludeFilter
 
+	// FactCheck is the spec's opt-in fact-checking declaration
+	// (DESIGN §6.4: expensive checks are funded by specs that opt
+	// in). Map of check-name -> cadence, e.g.
+	// {"external_truth": "quarterly"}. Empty = no opt-in.
+	FactCheck map[string]string
+
 	// Body is the (markdown) intent description; passed to the
 	// frontend as part of the prompt-or-template.
 	Body string

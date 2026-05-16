@@ -119,8 +119,9 @@ func Parse(id string, content []byte) (specs.Spec, error) {
 			Workspaces:   []string(f.Include.Workspaces),
 			ExcludeZones: f.Include.ExcludeZones,
 		},
-		Body: string(body),
-		Hash: hashContent(content),
+		FactCheck: f.FactCheck,
+		Body:      string(body),
+		Hash:      hashContent(content),
 	}, nil
 }
 

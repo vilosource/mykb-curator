@@ -1004,7 +1004,18 @@ The numbered milestones below were the original sequencing plan; status is updat
   (ProseBlock/Callout/heading), never structural machine content.
   Verified L1 (rules + ordering + determinism), config-validation
   unit, L2 pipeline-with-zonemarkers.
-- External truth check (opt-in web search per spec/area)
+- ✓ (landed 2026-05-16) External truth check: `ExternalTruthCheck`
+  maintenance check (web search + LLM verdict → Verify/Deprecate).
+  DESIGN §6.4 funding gate enforced — only areas a spec opted into
+  via `fact_check: external_truth` are ever researched; empty opt-in
+  = total no-op; no search results = no LLM spend. `WebSearch` is an
+  injected interface (deterministic/testable); `Spec.FactCheck` now
+  parsed + plumbed. Composition root computes the opted-in area set
+  and wires the check only when opted-in ∧ LLM configured. NB: the
+  real web-search provider adapter is **deferred to v2** — a no-op
+  provider is wired so the gate + check are live and safe meanwhile.
+  Verified L1 (gate, verdicts, cost discipline), parser unit, L2
+  through the real maintenance pipeline.
 - Optional run-report sinks: Slack webhook, email, kb workspace journal entry
 - Per-wiki lock + atomicity hardening (currently nothing prevents two concurrent runs against the same wiki)
 - Spec authoring guide + CONTRIBUTING.md
@@ -1016,6 +1027,9 @@ The numbered milestones below were the original sequencing plan; status is updat
 - 3-way merge in reconciler (preserve human edits inside machine-owned blocks where they don't conflict with regeneration)
 - mykb v2-daemon kb-source (live kb access via the privileged-write-channel)
 - Pre-filtered kb adapter (tag-based defense-in-depth for shared brains)
+- Real web-search provider adapter for the external-truth check
+  (Brave / SerpAPI / etc.) — the check + funding gate already exist
+  (v1.0); a no-op provider is wired until this lands
 - Spec authoring via `mykb-curator spec init` LLM conversation
 - `PandocBackend` (IR → Pandoc JSON → docx / PDF / EPUB / RTF)
 

@@ -37,6 +37,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/orchestrator"
 	"github.com/vilosource/mykb-curator/internal/pipelines/maintenance"
+	"github.com/vilosource/mykb-curator/internal/pipelines/maintenance/checks/externaltruth"
 	"github.com/vilosource/mykb-curator/internal/pipelines/maintenance/checks/linkrot"
 	"github.com/vilosource/mykb-curator/internal/pipelines/maintenance/checks/staleness"
 	"github.com/vilosource/mykb-curator/internal/pipelines/maintenance/prbackend"
@@ -159,7 +160,7 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 		orchLLM = llmClient
 	}
 
-	maintPipeline, onMaint := composeMaintenance(cfg)
+	maintPipeline, onMaint := composeMaintenance(cfg, specStore, llmClient)
 
 	orch := orchestrator.New(orchestrator.Deps{
 		Wiki:          cfg.Wiki,
@@ -315,20 +316,68 @@ func buildKnownPages(store specs.Store) map[string]bool {
 	return out
 }
 
+// optedInExternalTruthAreas implements the DESIGN §6.4 funding gate:
+// it returns the set of kb areas that at least one spec opted into
+// external-truth checking via `fact_check: external_truth`. Areas
+// nobody opted into are never externally researched. Best-effort: a
+// spec-store pull failure yields an empty set (check stays off).
+func optedInExternalTruthAreas(store specs.Store) []string {
+	list, err := store.Pull(context.Background())
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var areas []string
+	for _, s := range list {
+		if s.FactCheck["external_truth"] == "" {
+			continue
+		}
+		for _, a := range s.Include.Areas {
+			if !seen[a] {
+				seen[a] = true
+				areas = append(areas, a)
+			}
+		}
+	}
+	return areas
+}
+
+// noopWebSearch is the default WebSearch: it finds nothing, so the
+// external-truth check never calls the LLM and never proposes
+// anything. A real provider adapter (Brave/SerpAPI/etc.) is v2
+// backlog; this keeps the funding gate + check wired and safe
+// meanwhile.
+type noopWebSearch struct{}
+
+func (noopWebSearch) Search(context.Context, string) ([]externaltruth.Result, error) {
+	return nil, nil
+}
+
 // composeMaintenance builds the kb-maintenance pipeline + the
 // proposal handler.
 //
 // v0.5 defaults: staleness (90 days) + link-rot (5s HEAD timeout).
+// v1.0: an external-truth check is added iff (a) at least one spec
+// opted an area in via `fact_check: external_truth` (DESIGN §6.4
+// funding gate) and (b) an LLM client is configured. The web-search
+// provider adapter is not yet implemented; a no-op is wired so the
+// gate + check are live and safe (no results ⇒ no spend, no
+// proposals) until a real provider lands (v2 backlog).
+//
 // Returns (nil, nil) when kb_writeback.type is unset/none — the
 // orchestrator skips the maintenance phase entirely.
-func composeMaintenance(cfg *config.Config) (*maintenance.Pipeline, func([]maintenance.MutationProposal) error) {
+func composeMaintenance(cfg *config.Config, specStore specs.Store, llmClient llm.Client) (*maintenance.Pipeline, func([]maintenance.MutationProposal) error) {
 	if cfg.KBWriteback.Type == "" || cfg.KBWriteback.Type == "none" {
 		return nil, nil
 	}
-	pipeline := maintenance.NewPipeline(
-		staleness.New(90*24*time.Hour),
-		linkrot.New(5*time.Second),
-	)
+	checks := []maintenance.Check{
+		staleness.New(90 * 24 * time.Hour),
+		linkrot.New(5 * time.Second),
+	}
+	if optedIn := optedInExternalTruthAreas(specStore); len(optedIn) > 0 && llmClient != nil {
+		checks = append(checks, externaltruth.New(optedIn, noopWebSearch{}, llmClient, cfg.LLM.Model))
+	}
+	pipeline := maintenance.NewPipeline(checks...)
 	// PR backend writes to the kb working tree (the git source's
 	// clone dir). Only meaningful for kb_source.type=git; for local
 	// sources we skip the PR backend and just log the proposal count.
