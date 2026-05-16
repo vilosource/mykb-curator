@@ -87,7 +87,13 @@ Status legend: **OPEN** (not yet discussed) · **DISCUSSING** ·
 7. **Probe-eligibility of knowledge.** Empirical facts (versions,
    topology, what's deployed) are checkable; decisions/rationale/
    intent are not. Scope the check (tags/zones) to avoid false
-   deprecations on judgement-type knowledge. — **OPEN**
+   deprecations on judgement-type knowledge. — **RESOLVED
+   2026-05-16**: the reality-probe is scoped to empirically-
+   verifiable current-state facts ONLY; decisions / rationale /
+   "why" / patterns / intent are explicitly out of its scope and
+   are never auto-flagged for being unprobeable (that would delete
+   institutional memory). Scoping uses the existing entry
+   `Type`/tags/zones.
 8. **Credentials, org-asset separation, Entra boundary.** The
    curator needs wiki-bot creds and (for §2) cloud read creds,
    under the Optiscan vs viloforge separation rule and the Entra
@@ -138,6 +144,15 @@ LinkRotCheck, ExternalTruthCheck) already turns that into
 MutationProposals → PR via prbackend, intended to run nightly. So
 the brain self-curates; the human architects new pages + reviews
 proposals.
+
+### 2026-05-16 — Issue #7 (probe-eligibility) — RESOLVED
+
+Reality-probe scoped to empirically-verifiable current-state
+facts only. Decisions/rationale/patterns/intent are out of scope
+and never auto-flagged for being unprobeable — deleting
+institutional memory because it can't be probed is the worst-case
+failure and is excluded by design. Scoping via existing entry
+Type/tags/zones.
 
 ### 2026-05-16 — Issue #6 (agent reliability / evidence) — RESOLVED
 
