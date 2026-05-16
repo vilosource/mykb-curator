@@ -24,15 +24,38 @@ import (
 type MermaidRenderer struct {
 	// Bin is the mmdc binary name/path. Defaults to "mmdc".
 	Bin string
+
+	// PuppeteerConfig, when non-empty, is passed to mmdc as
+	// `-p <path>`. In a container mmdc's headless Chrome must run
+	// with --no-sandbox (a puppeteer config JSON); without it Chrome
+	// fails to launch and every mermaid render errors. Defaults from
+	// the MMDC_PUPPETEER_CONFIG env var (set by the runtime image).
+	PuppeteerConfig string
 }
 
 // NewMermaidRenderer constructs a MermaidRenderer using the given
-// mmdc binary path; empty means "mmdc" on PATH.
+// mmdc binary path; empty means "mmdc" on PATH. The puppeteer config
+// is taken from MMDC_PUPPETEER_CONFIG if set.
 func NewMermaidRenderer(bin string) *MermaidRenderer {
+	return NewMermaidRendererWithConfig(bin, os.Getenv("MMDC_PUPPETEER_CONFIG"))
+}
+
+// NewMermaidRendererWithConfig is the full-control constructor.
+func NewMermaidRendererWithConfig(bin, puppeteerConfig string) *MermaidRenderer {
 	if bin == "" {
 		bin = "mmdc"
 	}
-	return &MermaidRenderer{Bin: bin}
+	return &MermaidRenderer{Bin: bin, PuppeteerConfig: puppeteerConfig}
+}
+
+// MmdcArgs builds the mmdc argument vector. Exported for testing the
+// flag construction without executing mmdc.
+func (m *MermaidRenderer) MmdcArgs(in, out string) []string {
+	args := []string{"-i", in, "-o", out, "-e", "png"}
+	if m.PuppeteerConfig != "" {
+		args = append(args, "-p", m.PuppeteerConfig)
+	}
+	return args
 }
 
 // Render writes source to a temp .mmd file, runs mmdc to produce a
@@ -55,7 +78,7 @@ func (m *MermaidRenderer) Render(ctx context.Context, lang, source string) ([]by
 		return nil, "", fmt.Errorf("mmdc: write source: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, m.Bin, "-i", in, "-o", out, "-e", "png")
+	cmd := exec.CommandContext(ctx, m.Bin, m.MmdcArgs(in, out)...)
 	if combined, err := cmd.CombinedOutput(); err != nil {
 		return nil, "", fmt.Errorf("mmdc: run: %w; output=%s", err, combined)
 	}

@@ -19,6 +19,30 @@ func TestMermaidRenderer_UnsupportedLang(t *testing.T) {
 	}
 }
 
+func TestMermaidRenderer_PuppeteerConfigArg(t *testing.T) {
+	// In a container, mmdc's headless Chrome needs --no-sandbox via a
+	// puppeteer config file. The renderer must pass `-p <cfg>` when
+	// configured, and omit it otherwise.
+	with := renderdiagrams.NewMermaidRendererWithConfig("mmdc", "/etc/mmdc-pptr.json")
+	args := with.MmdcArgs("in.mmd", "out.png")
+	if !contains(args, "-p") || !contains(args, "/etc/mmdc-pptr.json") {
+		t.Errorf("args %v missing -p /etc/mmdc-pptr.json", args)
+	}
+	without := renderdiagrams.NewMermaidRenderer("")
+	if contains(without.MmdcArgs("in.mmd", "out.png"), "-p") {
+		t.Errorf("no puppeteer config ⇒ no -p flag; got %v", without.MmdcArgs("in.mmd", "out.png"))
+	}
+}
+
+func contains(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestMermaidRenderer_RealRender(t *testing.T) {
 	// Environment-gated: exercises the real mmdc subprocess only where
 	// mmdc is installed (the curator container / nightly). Skipped —
