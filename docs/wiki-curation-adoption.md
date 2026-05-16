@@ -145,6 +145,18 @@ MutationProposals → PR via prbackend, intended to run nightly. So
 the brain self-curates; the human architects new pages + reviews
 proposals.
 
+### 2026-05-16 — Discussion paused
+
+Resolved so far: #3, #5, #6, #7, #8, #11 (6 of 11). Still OPEN:
+#1 (LLM-as-Judge), #2 (grounding/hallucination boundary), #4
+(brain-vs-reality drift — a resolution was *proposed* [owned by
+the reality-probe per #5/#6/#7 for probeable facts; mykb
+freshness/staleness → human review for the rest; no separate
+mechanism] but NOT yet confirmed by the user, so it remains OPEN),
+#9 (non-determinism & cost), #10 (reconciliation/trust/change-mgmt,
+reduced by the personal-wiki descope). Resume by confirming/tweaking
+the #4 proposal, then continue one-by-one.
+
 ### 2026-05-16 — Issue #7 (probe-eligibility) — RESOLVED
 
 Reality-probe scoped to empirically-verifiable current-state
