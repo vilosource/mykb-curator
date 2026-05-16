@@ -15,10 +15,14 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os/exec"
@@ -98,17 +102,126 @@ func (s *server) complete(w http.ResponseWriter, r *http.Request) {
 	// follow-up PR that wires the real PiClient. For v0.0, we shell out
 	// to a placeholder invocation and surface a clear error if pi is
 	// not configured for batch mode.
-	text, err := s.invokePi(r, req)
+	resp, err := s.invokePi(r.Context(), req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	_ = json.NewEncoder(w).Encode(completeResponse{Text: text})
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// invokePi is the bridge between this wrapper's HTTP contract and
-// the pi CLI. The implementation is a stub for v0.0; the real
-// invocation lands when we know pi's batch-mode flags.
-func (s *server) invokePi(_ *http.Request, _ completeRequest) (string, error) {
-	return "", errors.New("pi-wrapper v0.0: pi batch-mode invocation not wired yet (see DESIGN.md §17 v0.5 roadmap)")
+// invokePi runs the pi CLI in single-shot batch mode and parses its
+// JSONL event stream. The flag set + stream schema are frozen in
+// docs/pi-harness-contract.md (resolved by the design spike).
+//
+//	pi --print --mode json --no-tools --no-session --no-extensions
+//	   --no-skills [--model M] [--system-prompt S] <prompt>
+//
+// --no-tools/-session/-extensions/-skills keep this a plain LLM call,
+// not the operator's kb-pi agent. MaxTokens has no pi flag and is
+// intentionally ignored (documented in the contract).
+func (s *server) invokePi(ctx context.Context, req completeRequest) (completeResponse, error) {
+	args := []string{
+		"--print", "--mode", "json",
+		"--no-tools", "--no-session", "--no-extensions", "--no-skills",
+	}
+	if req.Model != "" {
+		args = append(args, "--model", req.Model)
+	}
+	if strings.TrimSpace(req.System) != "" {
+		args = append(args, "--system-prompt", req.System)
+	}
+	args = append(args, req.Prompt)
+
+	cmd := exec.CommandContext(ctx, s.piBin, args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return completeResponse{}, fmt.Errorf("pi exec failed: %v; stderr=%s", err, strings.TrimSpace(stderr.String()))
+	}
+	resp, err := parsePiStream(&stdout)
+	if err != nil {
+		return completeResponse{}, err
+	}
+	return resp, nil
+}
+
+// piMsg / piEvent mirror the subset of the pi --mode json event
+// schema we depend on (docs/pi-harness-contract.md).
+type piMsg struct {
+	Role    string `json:"role"`
+	Content []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+	Usage struct {
+		Input  int `json:"input"`
+		Output int `json:"output"`
+	} `json:"usage"`
+}
+
+type piEvent struct {
+	Type     string  `json:"type"`
+	Messages []piMsg `json:"messages"` // agent_end
+	Message  *piMsg  `json:"message"`  // turn_end / message_end
+}
+
+// parsePiStream extracts the final assistant message from pi's JSONL
+// event stream per the frozen contract: prefer the last agent_end
+// (its last assistant message), then the last turn_end message, then
+// the last assistant message_end. Empty / no-assistant ⇒ error
+// (fail-loud; never a silent empty success).
+func parsePiStream(r io.Reader) (completeResponse, error) {
+	var final *piMsg
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var ev piEvent
+		if err := json.Unmarshal(line, &ev); err != nil {
+			continue // robust to interleaved non-JSON noise
+		}
+		switch ev.Type {
+		case "agent_end":
+			for i := len(ev.Messages) - 1; i >= 0; i-- {
+				if ev.Messages[i].Role == "assistant" {
+					m := ev.Messages[i]
+					final = &m
+					break
+				}
+			}
+		case "turn_end":
+			if ev.Message != nil && ev.Message.Role == "assistant" {
+				final = ev.Message
+			}
+		case "message_end":
+			if ev.Message != nil && ev.Message.Role == "assistant" {
+				final = ev.Message
+			}
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return completeResponse{}, fmt.Errorf("pi stream read: %w", err)
+	}
+	if final == nil {
+		return completeResponse{}, errors.New("pi produced no assistant message")
+	}
+	var text strings.Builder
+	for _, c := range final.Content {
+		if c.Type == "text" {
+			text.WriteString(c.Text)
+		}
+	}
+	if text.Len() == 0 {
+		return completeResponse{}, errors.New("pi assistant message had no text content")
+	}
+	return completeResponse{
+		Text:      text.String(),
+		TokensIn:  final.Usage.Input,
+		TokensOut: final.Usage.Output,
+	}, nil
 }
