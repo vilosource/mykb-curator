@@ -39,6 +39,14 @@ type Target interface {
 	// occurred on a page after the given bot revision. Load-bearing
 	// for the reconciler's soft-read-only contract.
 	HumanEditsSinceBot(ctx context.Context, title string, lastBotRevID string) (*HumanEdit, error)
+
+	// UploadFile uploads a binary asset (e.g. a rendered diagram) to
+	// the wiki under the given filename and returns the reference a
+	// backend embeds to display it (implementation-defined form —
+	// e.g. a MediaWiki "File:Name.png" title). Re-uploading identical
+	// content under the same filename must be idempotent (no error,
+	// same ref). Used by the RenderDiagrams pass.
+	UploadFile(ctx context.Context, filename string, content []byte, contentType, summary string) (assetRef string, err error)
 }
 
 // Page is a wiki page snapshot.

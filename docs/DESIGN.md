@@ -984,9 +984,16 @@ The numbered milestones below were the original sequencing plan; status is updat
 
 ### Not yet
 
-**v1.0 — Production hardening**
+**v1.0 — Production hardening** (in progress)
 
-- Diagram rendering pass (mermaid → png upload via wiki adapter's `UploadFile`)
+- ✓ (landed 2026-05-16) Diagram rendering pass: `RenderDiagrams` pass +
+  `wiki.Target.UploadFile`. Mermaid is first-class via an injected
+  `Renderer` (the `mmdc` subprocess stays behind the interface so the
+  pass is deterministic + unit-testable); unsupported languages take
+  the escape-hatch path. Deterministic content-hash filenames make
+  re-uploads idempotent at the wiki (verified: L4 scenario uploads to
+  real MediaWiki incl. `fileexists-no-change` idempotency; `mmdc`
+  real-render is unit-tested, env-gated/skipped where `mmdc` absent).
 - Style rules pass (configurable terminology / heading hierarchy / link format)
 - External truth check (opt-in web search per spec/area)
 - Optional run-report sinks: Slack webhook, email, kb workspace journal entry

@@ -55,6 +55,9 @@ func (inMemWiki) History(context.Context, string, string) ([]wiki.Revision, erro
 func (inMemWiki) HumanEditsSinceBot(context.Context, string, string) (*wiki.HumanEdit, error) {
 	return nil, nil
 }
+func (inMemWiki) UploadFile(context.Context, string, []byte, string, string) (string, error) {
+	return "File:skeleton.png", nil
+}
 
 type inMemLLM struct{}
 

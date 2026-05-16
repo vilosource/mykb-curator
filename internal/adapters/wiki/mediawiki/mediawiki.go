@@ -9,16 +9,20 @@
 //
 // What the adapter does not yet do (parked for follow-up slices):
 //   - History pagination beyond ~50 revisions
-//   - File uploads (RenderDiagrams pass)
 //   - Atomic-edit via basetimestamp (race with concurrent human edit)
 //   - Throttle / retry on maxlag
 package mediawiki
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
+	"net/http/cookiejar"
 	"strconv"
 	"time"
 
@@ -187,6 +191,112 @@ func (t *Target) UpsertPage(ctx context.Context, title, content, summary string)
 		Comment:   summary,
 		IsBot:     true,
 	}, nil
+}
+
+// UploadFile uploads a binary asset via action=upload and returns
+// its "File:<name>" reference. go-mwclient has no upload helper, so
+// the request is hand-rolled as multipart/form-data over a fresh
+// http.Client seeded with the authenticated session cookies — the
+// same bypass strategy GetPage uses for the v1 parse response.
+//
+// ignorewarnings=1 makes the call idempotent: re-uploading identical
+// content under the same filename returns result=Success (MediaWiki
+// detects the exact-duplicate / exists warning and we suppress it)
+// rather than erroring, so the RenderDiagrams pass can re-run safely.
+func (t *Target) UploadFile(ctx context.Context, filename string, content []byte, _, summary string) (string, error) {
+	if err := t.ensureAuth(ctx); err != nil {
+		return "", fmt.Errorf("mediawiki: auth: %w", err)
+	}
+	// Fresh csrf token before the write — fresh SQLite installs rotate
+	// tokens, same rationale as UpsertPage.
+	delete(t.client.Tokens, "csrf")
+	token, err := t.client.GetToken("csrf")
+	if err != nil {
+		return "", fmt.Errorf("mediawiki: csrf token: %w", err)
+	}
+
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fields := map[string]string{
+		"action":         "upload",
+		"filename":       filename,
+		"token":          token,
+		"ignorewarnings": "1",
+		"comment":        summary,
+		"format":         "json",
+	}
+	for k, v := range fields {
+		if err := mw.WriteField(k, v); err != nil {
+			return "", fmt.Errorf("mediawiki: upload form field %q: %w", k, err)
+		}
+	}
+	fw, err := mw.CreateFormFile("file", filename)
+	if err != nil {
+		return "", fmt.Errorf("mediawiki: upload file part: %w", err)
+	}
+	if _, err := fw.Write(content); err != nil {
+		return "", fmt.Errorf("mediawiki: upload file write: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return "", fmt.Errorf("mediawiki: upload form close: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.cfg.APIURL, &body)
+	if err != nil {
+		return "", fmt.Errorf("mediawiki: upload request: %w", err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("User-Agent", t.cfg.UserAgent)
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return "", fmt.Errorf("mediawiki: cookie jar: %w", err)
+	}
+	if u := req.URL; u != nil {
+		jar.SetCookies(u, t.client.DumpCookies())
+	}
+	httpClient := &http.Client{Jar: jar}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("mediawiki: upload POST: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("mediawiki: upload read response: %w", err)
+	}
+
+	var parsed struct {
+		Upload struct {
+			Result   string `json:"result"`
+			Filename string `json:"filename"`
+		} `json:"upload"`
+		Error *struct {
+			Code string `json:"code"`
+			Info string `json:"info"`
+		} `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return "", fmt.Errorf("mediawiki: decode upload response: %w; body=%s", err, raw)
+	}
+	if parsed.Error != nil {
+		// fileexists-no-change: the wiki already holds a byte-identical
+		// copy under this name. That is exactly the idempotent outcome
+		// the RenderDiagrams pass wants (deterministic filename ⇒ same
+		// content ⇒ this code on re-run), so treat it as success.
+		if parsed.Error.Code == "fileexists-no-change" {
+			return "File:" + filename, nil
+		}
+		return "", fmt.Errorf("mediawiki: upload error %s: %s", parsed.Error.Code, parsed.Error.Info)
+	}
+	if parsed.Upload.Result != "Success" {
+		return "", fmt.Errorf("mediawiki: upload result %q (not Success); body=%s", parsed.Upload.Result, raw)
+	}
+	name := parsed.Upload.Filename
+	if name == "" {
+		name = filename
+	}
+	return "File:" + name, nil
 }
 
 // History fetches revision metadata, newest first. sinceRevID, when

@@ -106,4 +106,29 @@ func WikiTargetContractSuite(t *testing.T, tgt wiki.Target) {
 			t.Errorf("expected nil, got %+v", got)
 		}
 	})
+
+	t.Run("UploadFile returns a non-empty asset ref", func(t *testing.T) {
+		ref, err := tgt.UploadFile(ctx, "WikiContract_Asset.png", []byte("\x89PNG\r\n"), "image/png", "test upload")
+		if err != nil {
+			t.Fatalf("UploadFile: %v", err)
+		}
+		if ref == "" {
+			t.Errorf("UploadFile returned an empty asset ref")
+		}
+	})
+
+	t.Run("UploadFile is idempotent for identical filename+content", func(t *testing.T) {
+		content := []byte("\x89PNG\r\nidem")
+		r1, err := tgt.UploadFile(ctx, "WikiContract_Idem.png", content, "image/png", "first")
+		if err != nil {
+			t.Fatalf("UploadFile #1: %v", err)
+		}
+		r2, err := tgt.UploadFile(ctx, "WikiContract_Idem.png", content, "image/png", "second")
+		if err != nil {
+			t.Fatalf("UploadFile #2 (same name+content must not error): %v", err)
+		}
+		if r1 != r2 {
+			t.Errorf("idempotent re-upload changed ref: %q -> %q", r1, r2)
+		}
+	})
 }

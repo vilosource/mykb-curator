@@ -25,6 +25,7 @@ type Target struct {
 	mu       sync.Mutex
 	identity string
 	pages    map[string]*pageState // keyed by normalised title
+	assets   map[string][]byte     // uploaded files, keyed by filename
 }
 
 // pageState holds a page's revision history newest-first, with
@@ -41,7 +42,20 @@ func New(identity string) *Target {
 	return &Target{
 		identity: identity,
 		pages:    make(map[string]*pageState),
+		assets:   make(map[string][]byte),
 	}
+}
+
+// UploadFile stores the asset in memory and returns a deterministic
+// "File:<name>" reference. Idempotent: re-uploading the same
+// filename+content is a no-op returning the same ref; a conflicting
+// content under an existing filename overwrites (last write wins,
+// matching MediaWiki's ignorewarnings upload behaviour).
+func (t *Target) UploadFile(_ context.Context, filename string, content []byte, _, _ string) (string, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.assets[filename] = content
+	return "File:" + filename, nil
 }
 
 // Whoami returns the configured bot identity.

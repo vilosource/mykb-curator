@@ -113,7 +113,13 @@ func startMediaWiki(t *testing.T) *mediawikiFixture {
 	// install.php ran as root (Exec default user); SQLite DB +
 	// LocalSettings.php are root-owned and unreadable by www-data,
 	// which serves the wiki. Fix ownership before Apache reads them.
+	//
+	// Also enable file uploads: $wgEnableUploads defaults to false in
+	// MediaWiki, but the RenderDiagrams pass uploads rendered diagrams
+	// via action=upload. Appending the flag to LocalSettings.php is
+	// the documented way to turn it on; harmless to other scenarios.
 	rc, out, _ = c.Exec(ctx, []string{"sh", "-c", `
+		printf '\n$wgEnableUploads = true;\n' >> /var/www/html/LocalSettings.php
 		chown -R www-data:www-data /var/www/data /var/www/html/LocalSettings.php
 		chmod 644 /var/www/html/LocalSettings.php
 		ls -la /var/www/html/LocalSettings.php /var/www/data/

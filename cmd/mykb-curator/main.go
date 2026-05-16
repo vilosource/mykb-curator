@@ -46,6 +46,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/projection"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes/renderdiagrams"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes/resolvekbrefs"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes/validatelinks"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes/zonemarkers"
@@ -135,7 +136,7 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 	// Pass pipeline is per-run because ResolveKBRefs closes over the
 	// kb snapshot. ValidateLinks's known-pages map is built from the
 	// loaded specs (every spec.Page is a known target).
-	buildPasses := composePassPipeline(specStore)
+	buildPasses := composePassPipeline(specStore, wikiTarget, renderdiagrams.NewMermaidRenderer(""))
 
 	onRendered := composeOnRenderedSink(ctx, cfg, wikiTarget, outDir)
 
@@ -254,11 +255,13 @@ func makeWikiUpsertSink(ctx context.Context, target wikipkg.Target) func(string,
 // function (not a Pipeline directly) because some passes need the
 // kb snapshot — captured by the orchestrator at run-time.
 //
-// Default pipeline: ResolveKBRefs → ApplyZoneMarkers → ValidateLinks.
-// Order matters: ResolveKBRefs replaces KBRefBlocks with ProseBlocks
-// so ApplyZoneMarkers sees a clean block list, and ValidateLinks
+// Default pipeline: ResolveKBRefs → RenderDiagrams → ApplyZoneMarkers
+// → ValidateLinks. Order matters: ResolveKBRefs replaces KBRefBlocks
+// with ProseBlocks so later passes see a clean block list;
+// RenderDiagrams runs before ApplyZoneMarkers (DESIGN.md §5.4) so the
+// markers wrap the final asset-ref'd diagram block; ValidateLinks
 // runs last so it catches links in resolved content too.
-func composePassPipeline(specStore specs.Store) func(kbpkg.Snapshot) *passes.Pipeline {
+func composePassPipeline(specStore specs.Store, uploader renderdiagrams.Uploader, renderer renderdiagrams.Renderer) func(kbpkg.Snapshot) *passes.Pipeline {
 	return func(snap kbpkg.Snapshot) *passes.Pipeline {
 		// Build known-pages map from the loaded specs. Best-effort:
 		// any pull failure leaves the map empty, which ValidateLinks
@@ -266,6 +269,7 @@ func composePassPipeline(specStore specs.Store) func(kbpkg.Snapshot) *passes.Pip
 		known := buildKnownPages(specStore)
 		return passes.NewPipeline(
 			resolvekbrefs.New(snap),
+			renderdiagrams.New(renderer, uploader),
 			zonemarkers.New(),
 			validatelinks.New(known),
 		)

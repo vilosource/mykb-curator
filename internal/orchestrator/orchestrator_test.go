@@ -60,6 +60,9 @@ func (fakeWiki) History(ctx context.Context, _, _ string) ([]wiki.Revision, erro
 func (fakeWiki) HumanEditsSinceBot(ctx context.Context, _, _ string) (*wiki.HumanEdit, error) {
 	return nil, nil
 }
+func (fakeWiki) UploadFile(context.Context, string, []byte, string, string) (string, error) {
+	return "File:fake.png", nil
+}
 
 // fakeLLM is unused for v0.0 but satisfies the interface.
 type fakeLLM struct{}
