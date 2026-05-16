@@ -21,6 +21,31 @@ type Config struct {
 	LLM         LLMConfig         `yaml:"llm"`
 	CacheDir    string            `yaml:"cache_dir"`
 	Style       StyleConfig       `yaml:"style"`
+	Sinks       SinksConfig       `yaml:"report_sinks"`
+}
+
+// SinksConfig configures the optional run-report sinks. Every field
+// is opt-in; absent = that sink is not wired.
+type SinksConfig struct {
+	// SlackWebhookEnv names the env var holding the incoming-webhook
+	// URL (secret never in config plaintext).
+	SlackWebhookEnv string `yaml:"slack_webhook_env"`
+
+	// Email, when SMTPAddr+From+To are all set, sends the summary.
+	Email EmailSinkConfig `yaml:"email"`
+
+	// KBJournal, when true, appends the summary to the active kb
+	// workspace journal via the `kb` CLI.
+	KBJournal bool `yaml:"kb_journal"`
+}
+
+// EmailSinkConfig is the SMTP envelope for the email sink.
+type EmailSinkConfig struct {
+	SMTPAddr    string   `yaml:"smtp_addr"` // host:port
+	Username    string   `yaml:"username"`
+	PasswordEnv string   `yaml:"password_env"`
+	From        string   `yaml:"from"`
+	To          []string `yaml:"to"`
 }
 
 // StyleConfig drives the deterministic ApplyStyleRules pass. All

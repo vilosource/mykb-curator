@@ -16,7 +16,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/http"
+	"net/smtp"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -53,6 +56,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes/validatelinks"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes/zonemarkers"
 	"github.com/vilosource/mykb-curator/internal/reporter"
+	"github.com/vilosource/mykb-curator/internal/reporter/sinks"
 )
 
 var (
@@ -178,11 +182,14 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 		OnMaintenance: onMaint,
 	})
 
+	sink := composeReportSinks(cfg)
+
 	report, err := orch.Run(ctx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run failed:", err)
 		fmt.Fprintln(os.Stderr, report.Summary())
 		persistReport(report, reportDir)
+		publishReport(ctx, sink, report)
 		return err
 	}
 	fmt.Println(report.Summary())
@@ -190,7 +197,65 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 		fmt.Printf("  spec=%s status=%s blocks=%d %s\n", s.ID, s.Status, s.BlocksRegenerated, s.Reason)
 	}
 	persistReport(report, reportDir)
+	publishReport(ctx, sink, report)
 	return nil
+}
+
+// publishReport fans the report out to the configured sinks.
+// Observational only: sink failures are logged, never fatal (the
+// pages already shipped).
+func publishReport(ctx context.Context, sink reporter.Sink, report reporter.Report) {
+	if err := sink.Publish(ctx, report); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: report sink:", err)
+	}
+}
+
+// composeReportSinks builds the MultiSink from config. Each sink is
+// opt-in; secrets are resolved from env, never config plaintext. An
+// unset/incomplete sink is silently skipped (with a stderr note for
+// the partially-configured case).
+func composeReportSinks(cfg *config.Config) reporter.Sink {
+	var enabled []reporter.Sink
+	if envName := cfg.Sinks.SlackWebhookEnv; envName != "" {
+		if url := os.Getenv(envName); url != "" {
+			enabled = append(enabled, sinks.NewSlack(url, http.DefaultClient))
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: report_sinks.slack_webhook_env=%q is empty; slack sink disabled\n", envName)
+		}
+	}
+	if e := cfg.Sinks.Email; e.SMTPAddr != "" && e.From != "" && len(e.To) > 0 {
+		enabled = append(enabled, sinks.NewEmail(smtpSender{cfg: e}, e.From, e.To))
+	}
+	if cfg.Sinks.KBJournal {
+		enabled = append(enabled, sinks.NewKBJournal(execRunner{}))
+	}
+	return reporter.NewMultiSink(enabled...)
+}
+
+// smtpSender is the production sinks.Sender — net/smtp. PlainAuth is
+// used only when a username + password env are configured (supports
+// open relays / local MTAs without auth too).
+type smtpSender struct{ cfg config.EmailSinkConfig }
+
+func (s smtpSender) Send(from string, to []string, subject string, body []byte) error {
+	msg := []byte(fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\n\r\n%s",
+		from, strings.Join(to, ", "), subject, body))
+	var auth smtp.Auth
+	if s.cfg.Username != "" && s.cfg.PasswordEnv != "" {
+		host := s.cfg.SMTPAddr
+		if i := strings.LastIndex(host, ":"); i >= 0 {
+			host = host[:i]
+		}
+		auth = smtp.PlainAuth("", s.cfg.Username, os.Getenv(s.cfg.PasswordEnv), host)
+	}
+	return smtp.SendMail(s.cfg.SMTPAddr, auth, from, to, msg)
+}
+
+// execRunner is the production sinks.Runner — runs the real binary.
+type execRunner struct{}
+
+func (execRunner) Run(ctx context.Context, name string, args ...string) error {
+	return exec.CommandContext(ctx, name, args...).Run()
 }
 
 // persistReport writes the run report to disk if reportDir is set.

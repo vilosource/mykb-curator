@@ -1016,7 +1016,17 @@ The numbered milestones below were the original sequencing plan; status is updat
   provider is wired so the gate + check are live and safe meanwhile.
   Verified L1 (gate, verdicts, cost discipline), parser unit, L2
   through the real maintenance pipeline.
-- Optional run-report sinks: Slack webhook, email, kb workspace journal entry
+- ✓ (landed 2026-05-16) Optional run-report sinks: `reporter.Sink` +
+  best-effort `MultiSink` (aggregates errors, never short-circuits),
+  with `Slack` (webhook), `Email` (SMTP), and `KBJournal`
+  (`kb work journal`) impls. Each takes its external boundary as an
+  injected interface (HTTP doer / mail sender / command runner) →
+  deterministic + unit-testable, no network. Config `report_sinks:`
+  (slack_webhook_env / email / kb_journal); secrets via env.
+  Publishing is observational — sink failure logs, never fails the
+  run (pages already shipped); fires on success AND failed runs.
+  Verified L1 (each sink + MultiSink fan-out/best-effort) + L2
+  (three real sinks through real MultiSink, cross-package).
 - Per-wiki lock + atomicity hardening (currently nothing prevents two concurrent runs against the same wiki)
 - Spec authoring guide + CONTRIBUTING.md
 
