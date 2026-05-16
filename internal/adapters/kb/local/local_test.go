@@ -54,6 +54,69 @@ func writeArea(t *testing.T, root, id, name string, entries []kb.Entry) {
 	}
 }
 
+// The real ~/.mykb brain has entries (and areas) whose `tags` is a
+// comma/space-separated STRING, not a JSON array. The adapter must
+// accept both shapes — a strict decoder aborted the whole run on
+// one such entry when first pointed at the real brain.
+func TestPull_ToleratesCSVStringTags(t *testing.T) {
+	root := t.TempDir()
+	areaDir := filepath.Join(root, "areas", "ai-integration")
+	if err := os.MkdirAll(areaDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// area.json with tags as a CSV string
+	if err := os.WriteFile(filepath.Join(areaDir, "area.json"),
+		[]byte(`{"id":"ai-integration","name":"AI","summary":"s","tags":"ai, entra sso"}`), 0o600); err != nil {
+		t.Fatalf("write area.json: %v", err)
+	}
+	// one fact with CSV-string tags, one with a JSON array — both valid
+	facts := `{"id":"f1","area":"ai-integration","type":"fact","text":"csv tags","tags":"copilot,entra,sso,plugin","zone":"active"}
+{"id":"f2","area":"ai-integration","type":"fact","text":"array tags","tags":["x","y"],"zone":"active"}
+`
+	if err := os.WriteFile(filepath.Join(areaDir, "facts.jsonl"), []byte(facts), 0o600); err != nil {
+		t.Fatalf("write facts: %v", err)
+	}
+
+	snap, err := New(root).Pull(context.Background())
+	if err != nil {
+		t.Fatalf("Pull must tolerate CSV-string tags, got: %v", err)
+	}
+	a := snap.Area("ai-integration")
+	if a == nil {
+		t.Fatalf("area not loaded")
+	}
+	if !equalStrs(a.Tags, []string{"ai", "entra", "sso"}) {
+		t.Errorf("area tags = %v, want [ai entra sso]", a.Tags)
+	}
+	var f1, f2 *kb.Entry
+	for i := range a.Entries {
+		switch a.Entries[i].ID {
+		case "f1":
+			f1 = &a.Entries[i]
+		case "f2":
+			f2 = &a.Entries[i]
+		}
+	}
+	if f1 == nil || !equalStrs(f1.Tags, []string{"copilot", "entra", "sso", "plugin"}) {
+		t.Errorf("f1 CSV tags parsed wrong: %+v", f1)
+	}
+	if f2 == nil || !equalStrs(f2.Tags, []string{"x", "y"}) {
+		t.Errorf("f2 array tags parsed wrong: %+v", f2)
+	}
+}
+
+func equalStrs(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestPull_ReadsAreaMetadata(t *testing.T) {
 	root := t.TempDir()
 	writeArea(t, root, "vault", "Vault", nil)

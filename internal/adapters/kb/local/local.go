@@ -96,10 +96,10 @@ func loadArea(dir string) (kb.Area, error) {
 		return kb.Area{}, fmt.Errorf("local kb: read %s: %w", areaJSON, err)
 	}
 	var m struct {
-		ID      string   `json:"id"`
-		Name    string   `json:"name"`
-		Summary string   `json:"summary"`
-		Tags    []string `json:"tags"`
+		ID      string    `json:"id"`
+		Name    string    `json:"name"`
+		Summary string    `json:"summary"`
+		Tags    csvOrList `json:"tags"`
 	}
 	if err := json.Unmarshal(meta, &m); err != nil {
 		return kb.Area{}, fmt.Errorf("local kb: parse %s: %w", areaJSON, err)
@@ -109,7 +109,7 @@ func loadArea(dir string) (kb.Area, error) {
 		ID:      m.ID,
 		Name:    m.Name,
 		Summary: m.Summary,
-		Tags:    m.Tags,
+		Tags:    []string(m.Tags),
 	}
 
 	// Optional entry files: any missing file is treated as zero entries.
@@ -146,14 +146,14 @@ func loadJSONL(path string) ([]kb.Entry, error) {
 			continue
 		}
 		var raw struct {
-			ID         string   `json:"id"`
-			Area       string   `json:"area"`
-			Type       string   `json:"type"`
-			Text       string   `json:"text"`
-			Tags       []string `json:"tags"`
-			Zone       string   `json:"zone"`
-			Created    string   `json:"created"`
-			Updated    string   `json:"updated"`
+			ID         string    `json:"id"`
+			Area       string    `json:"area"`
+			Type       string    `json:"type"`
+			Text       string    `json:"text"`
+			Tags       csvOrList `json:"tags"`
+			Zone       string    `json:"zone"`
+			Created    string    `json:"created"`
+			Updated    string    `json:"updated"`
 			Provenance struct {
 				Status string `json:"status"`
 				Source string `json:"source"`
@@ -171,7 +171,7 @@ func loadJSONL(path string) ([]kb.Entry, error) {
 			Area:       raw.Area,
 			Type:       raw.Type,
 			Text:       raw.Text,
-			Tags:       raw.Tags,
+			Tags:       []string(raw.Tags),
 			Zone:       raw.Zone,
 			Created:    raw.Created,
 			Updated:    raw.Updated,
@@ -183,6 +183,39 @@ func loadJSONL(path string) ([]kb.Entry, error) {
 		})
 	}
 	return out, sc.Err()
+}
+
+// csvOrList tolerates `tags` being either a JSON array of strings
+// (`["a","b"]`) OR a single comma/space-separated string
+// (`"a,b c"`). The real ~/.mykb brain contains both shapes (older
+// kb writers emitted CSV strings); the acme fixtures only used
+// arrays, which is why this never surfaced until the curator was
+// pointed at the real brain. A too-strict decoder aborting the
+// whole run on one differently-shaped entry is unacceptable for a
+// real brain — accept the data as it actually is.
+type csvOrList []string
+
+func (c *csvOrList) UnmarshalJSON(b []byte) error {
+	if len(b) > 0 && b[0] == '[' {
+		var arr []string
+		if err := json.Unmarshal(b, &arr); err != nil {
+			return err
+		}
+		*c = arr
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	var out []string
+	for _, f := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' }) {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	*c = out
+	return nil
 }
 
 func errIsNotExist(err error) bool {
