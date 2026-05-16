@@ -20,6 +20,19 @@ type Config struct {
 	KBWriteback KBWritebackConfig `yaml:"kb_writeback"`
 	LLM         LLMConfig         `yaml:"llm"`
 	CacheDir    string            `yaml:"cache_dir"`
+	Style       StyleConfig       `yaml:"style"`
+}
+
+// StyleConfig drives the deterministic ApplyStyleRules pass. All
+// fields optional; absent = that rule is not applied.
+type StyleConfig struct {
+	// Terminology maps wrong/variant term -> canonical form. Applied
+	// whole-word to prose, callouts, and headings.
+	Terminology map[string]string `yaml:"terminology"`
+
+	// HeadingCase normalises Section heading casing. "" (off),
+	// "sentence", or "title".
+	HeadingCase string `yaml:"heading_case"`
 }
 
 type KBSourceConfig struct {
@@ -90,6 +103,11 @@ func (c *Config) Validate() error {
 	}
 	if c.WikiTarget.Type == "" {
 		return fmt.Errorf("wiki_target.type: required")
+	}
+	switch c.Style.HeadingCase {
+	case "", "sentence", "title":
+	default:
+		return fmt.Errorf("style.heading_case: %q invalid (want \"sentence\", \"title\", or empty)", c.Style.HeadingCase)
 	}
 	return nil
 }

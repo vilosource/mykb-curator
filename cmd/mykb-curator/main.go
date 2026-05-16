@@ -46,6 +46,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/projection"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes/applystylerules"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes/renderdiagrams"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes/resolvekbrefs"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes/validatelinks"
@@ -136,7 +137,7 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 	// Pass pipeline is per-run because ResolveKBRefs closes over the
 	// kb snapshot. ValidateLinks's known-pages map is built from the
 	// loaded specs (every spec.Page is a known target).
-	buildPasses := composePassPipeline(specStore, wikiTarget, renderdiagrams.NewMermaidRenderer(""))
+	buildPasses := composePassPipeline(specStore, wikiTarget, renderdiagrams.NewMermaidRenderer(""), cfg.Style)
 
 	onRendered := composeOnRenderedSink(ctx, cfg, wikiTarget, outDir)
 
@@ -255,13 +256,15 @@ func makeWikiUpsertSink(ctx context.Context, target wikipkg.Target) func(string,
 // function (not a Pipeline directly) because some passes need the
 // kb snapshot — captured by the orchestrator at run-time.
 //
-// Default pipeline: ResolveKBRefs → RenderDiagrams → ApplyZoneMarkers
-// → ValidateLinks. Order matters: ResolveKBRefs replaces KBRefBlocks
-// with ProseBlocks so later passes see a clean block list;
+// Default pipeline: ResolveKBRefs → ApplyStyleRules → RenderDiagrams
+// → ApplyZoneMarkers → ValidateLinks. Order matters: ResolveKBRefs
+// replaces KBRefBlocks with ProseBlocks so later passes see a clean
+// block list; ApplyStyleRules normalises prose before it is wrapped;
 // RenderDiagrams runs before ApplyZoneMarkers (DESIGN.md §5.4) so the
 // markers wrap the final asset-ref'd diagram block; ValidateLinks
 // runs last so it catches links in resolved content too.
-func composePassPipeline(specStore specs.Store, uploader renderdiagrams.Uploader, renderer renderdiagrams.Renderer) func(kbpkg.Snapshot) *passes.Pipeline {
+func composePassPipeline(specStore specs.Store, uploader renderdiagrams.Uploader, renderer renderdiagrams.Renderer, style config.StyleConfig) func(kbpkg.Snapshot) *passes.Pipeline {
+	styleRules := buildStyleRules(style)
 	return func(snap kbpkg.Snapshot) *passes.Pipeline {
 		// Build known-pages map from the loaded specs. Best-effort:
 		// any pull failure leaves the map empty, which ValidateLinks
@@ -269,11 +272,30 @@ func composePassPipeline(specStore specs.Store, uploader renderdiagrams.Uploader
 		known := buildKnownPages(specStore)
 		return passes.NewPipeline(
 			resolvekbrefs.New(snap),
+			applystylerules.New(styleRules...),
 			renderdiagrams.New(renderer, uploader),
 			zonemarkers.New(),
 			validatelinks.New(known),
 		)
 	}
+}
+
+// buildStyleRules maps the per-wiki style config onto the
+// config-agnostic ApplyStyleRules Rule set. heading_case is already
+// validated by config.Validate, so the constructor error here is
+// unreachable in practice; it is dropped deliberately rather than
+// panicking the run.
+func buildStyleRules(style config.StyleConfig) []applystylerules.Rule {
+	var rules []applystylerules.Rule
+	if len(style.Terminology) > 0 {
+		rules = append(rules, applystylerules.NewTerminologyRule(style.Terminology))
+	}
+	if style.HeadingCase != "" {
+		if hc, err := applystylerules.NewHeadingCaseRule(style.HeadingCase); err == nil {
+			rules = append(rules, hc)
+		}
+	}
+	return rules
 }
 
 // buildKnownPages collects spec.Page values from the spec store into

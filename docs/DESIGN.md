@@ -994,7 +994,16 @@ The numbered milestones below were the original sequencing plan; status is updat
   re-uploads idempotent at the wiki (verified: L4 scenario uploads to
   real MediaWiki incl. `fileexists-no-change` idempotency; `mmdc`
   real-render is unit-tested, env-gated/skipped where `mmdc` absent).
-- Style rules pass (configurable terminology / heading hierarchy / link format)
+- ✓ (landed 2026-05-16) Style rules pass: `ApplyStyleRules`,
+  config-driven (`style:` block → `terminology` map + `heading_case`).
+  Composed of independent `Rule` strategies (Open/Closed); ships
+  `TerminologyRule` (whole-word, sorted-key-deterministic) +
+  `HeadingCaseRule` (sentence/title). Pass package stays
+  config-agnostic (composition root maps config → rules);
+  `heading_case` validated at config load. Touches only human prose
+  (ProseBlock/Callout/heading), never structural machine content.
+  Verified L1 (rules + ordering + determinism), config-validation
+  unit, L2 pipeline-with-zonemarkers.
 - External truth check (opt-in web search per spec/area)
 - Optional run-report sinks: Slack webhook, email, kb workspace journal entry
 - Per-wiki lock + atomicity hardening (currently nothing prevents two concurrent runs against the same wiki)

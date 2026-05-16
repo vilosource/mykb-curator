@@ -80,3 +80,23 @@ func TestLoad_MissingRequired(t *testing.T) {
 		})
 	}
 }
+
+func TestValidate_HeadingCase(t *testing.T) {
+	base := func(hc string) *Config {
+		return &Config{
+			Wiki:       "acme",
+			KBSource:   KBSourceConfig{Type: "local"},
+			SpecStore:  SpecStoreConfig{Type: "local"},
+			WikiTarget: WikiTargetConfig{Type: "memory"},
+			Style:      StyleConfig{HeadingCase: hc},
+		}
+	}
+	for _, ok := range []string{"", "sentence", "title"} {
+		if err := base(ok).Validate(); err != nil {
+			t.Errorf("heading_case %q should be valid, got %v", ok, err)
+		}
+	}
+	if err := base("SHOUTING").Validate(); err == nil {
+		t.Errorf("heading_case \"SHOUTING\" should be rejected")
+	}
+}
