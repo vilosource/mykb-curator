@@ -1073,19 +1073,22 @@ The numbered milestones below were the original sequencing plan; status is updat
   load-bearing (an invalid id ⇒ pi emits no text); the agentic
   scenario pins a verified default.
 
+- ✓ (fixed 2026-05-16, gotcha `eEeHXXRM` resolved) Run-report
+  honesty: a byte-identical re-write returns go-mwclient
+  `ErrEditNoChange`; the mediawiki adapter now treats that as the
+  idempotent no-op success it is (not a `status=failed`). The run
+  report is load-bearing for the soft-read-only contract, so a
+  lying report was a real defect — gated out of v1.0. Regression:
+  `TestScenario_IdempotentUpsert_NotReportedFailed` (real MediaWiki
+  L4, double identical upsert must succeed).
+
 ### Not yet
 
-**Bug — first-create reports failed (found by the harness, 2026-05-16)**
-
-- Against a real MediaWiki, first-time page creation lands the page
-  correctly but the spec is reported `status=failed` with
-  "edit successful, but did not change page": the mediawiki adapter
-  surfaces go-mwclient `ErrEditNoChange` on the create path. Content
-  is correct; the run report lies. Exposed by the first end-to-end
-  curator-config run through the live experiment harness. kb gotcha
-  `eEeHXXRM`. Fix = treat create/no-change as success in the
-  adapter+reconciler, with a regression test on the real-MediaWiki
-  L4 path.
+_Nothing blocking v1.0. Remaining items are deferred-with-a-plan:_
+see the v2+ backlog below (Judge Agent quality loop, real
+web-search provider) and the documented IR limitation (flat heading
+depth — editorial `###` sub-topics render as `==` H2; preserving
+depth is a v2 IR change).
 
 **v2+ — Extensibility**
 

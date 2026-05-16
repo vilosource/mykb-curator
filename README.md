@@ -2,7 +2,24 @@
 
 Maintains human-facing wikis as curated, continuously-updated projections of a [mykb](https://github.com/vilosource/mykb) brain.
 
-**Status:** v1.0 complete (as of 2026-05-16) — walking skeleton, editorial mode + KB maintenance, editorial reconcile + spec-hash cache, and v1.0 production hardening (diagram rendering, style rules, opt-in external-truth check, run-report sinks, per-wiki lock, docs) all landed and CI-green across the full four-level test pyramid. See [`docs/DESIGN.md` §17](docs/DESIGN.md#17-roadmap) for the roadmap and [`CONTRIBUTING.md`](CONTRIBUTING.md) / [`docs/spec-authoring-guide.md`](docs/spec-authoring-guide.md) to get started.
+**Status:** **v1.0.0** (2026-05-16). The full pipeline works end to
+end and is verified live: projection + editorial specs render to a
+real MediaWiki as correct **wikitext** (headings, lists, tables,
+inline formatting) with mermaid **diagrams** auto-rendered to
+uploaded images; a live **Pi agent** can author pages; soft-read-only
+reconciliation, run-report sinks, per-wiki lock, opt-in external-truth
+check, and the `make harness-up` experiment harness all landed.
+CI-green across the full four-level test pyramid (unit / integration
+/ contract / real-MediaWiki scenario).
+
+Deferred-with-a-plan (not in 1.0, tracked in [`docs/DESIGN.md`
+§17](docs/DESIGN.md#17-roadmap)): a Judge-Agent output-quality loop,
+a real web-search provider for the external-truth check, and
+heading-depth in the IR (editorial `###` currently flattens to H2).
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) /
+[`docs/spec-authoring-guide.md`](docs/spec-authoring-guide.md) to
+get started.
 
 **Language:** Go 1.25.
 

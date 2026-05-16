@@ -182,9 +182,15 @@ func (t *Target) UpsertPage(ctx context.Context, title, content, summary string)
 		"text":    content,
 		"summary": summary,
 		"bot":     "1",
-	}); err != nil {
+	}); err != nil && !errors.Is(err, mwclient.ErrEditNoChange) {
 		return wiki.Revision{}, fmt.Errorf("mediawiki: edit %q: %w", title, err)
 	}
+	// ErrEditNoChange means the submitted text was byte-identical to
+	// what's already on the page: the desired state is present, so
+	// this is an idempotent no-op SUCCESS, not a failure. Reporting
+	// it as failed made the run report lie on unchanged re-runs —
+	// and the run report is load-bearing for the soft-read-only
+	// contract (DESIGN §5/§11), so a lying report is a real defect.
 	return wiki.Revision{
 		User:      t.cfg.BotUser,
 		Timestamp: time.Now().UTC(),
