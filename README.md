@@ -2,7 +2,7 @@
 
 Maintains human-facing wikis as curated, continuously-updated projections of a [mykb](https://github.com/vilosource/mykb) brain.
 
-**Status:** v0.0 walking skeleton — design + scaffold landed; rendering pipeline not yet implemented.
+**Status:** v0.6 complete (as of 2026-05-16) — walking skeleton, editorial mode + KB maintenance, editorial reconcile + spec-hash cache all landed and CI-green across the full four-level test pyramid. Next: v1.0 production hardening (see [`docs/DESIGN.md` §17](docs/DESIGN.md#17-roadmap)).
 
 **Language:** Go 1.25.
 

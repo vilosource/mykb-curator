@@ -943,7 +943,7 @@ Tech choices:
 
 The numbered milestones below were the original sequencing plan; status is updated as work lands.
 
-### Done (as of 2026-05-15)
+### Done (as of 2026-05-16)
 
 **v0.1 — Walking Skeleton** ✓
 
@@ -969,6 +969,12 @@ The numbered milestones below were the original sequencing plan; status is updat
 - Run-state cache: `bbolt` per-wiki file persisting `(specID → LastBotRevID, LastKBCommit)` so reconciler exits first-render mode after run 1
 - First L4 scenario test: real MediaWiki container via testcontainers-go, full pipeline writes a fixture spec to the wiki, content verified via API
 
+**v0.6 — Editorial reconcile + spec-hash cache** ✓ (landed 2026-05-16)
+
+- Editorial regions in reconciler (block provenance, preserve human polish when inputs unchanged)
+- Cache rendered IR by `(spec_hash, kb_subset_hash, pipeline_version)` so unchanged-input specs skip the LLM frontend entirely
+- Recording LLM client (replay-cache populator that wraps a real provider)
+
 **Engineering** ✓
 
 - All four pyramid levels exercised (unit / integration / contract / scenario)
@@ -977,12 +983,6 @@ The numbered milestones below were the original sequencing plan; status is updat
 - TDD red/green discipline followed for every behaviour-bearing component
 
 ### Not yet
-
-**v0.6 — Editorial reconcile + spec-hash cache**
-
-- Editorial regions in reconciler (block provenance, preserve human polish when inputs unchanged)
-- Cache rendered IR by `(spec_hash, kb_subset_hash, pipeline_version)` so unchanged-input specs skip the LLM frontend entirely
-- Recording LLM client (replay-cache populator that wraps a real provider)
 
 **v1.0 — Production hardening**
 
