@@ -145,6 +145,20 @@ MutationProposals → PR via prbackend, intended to run nightly. So
 the brain self-curates; the human architects new pages + reviews
 proposals.
 
+### 2026-05-16 — Hub frontend built (IA keystone, no shortcuts)
+
+User chose the long-term solution over fake/editorial hubs. The
+`hub` frontend + `ir.IndexBlock` are now built, tested (full
+pyramid incl L4), CI-green on main (commit 2915f3f): deterministic
+index pages, spec-authored structure, kb-sourced link descriptions,
+ValidateLinks-checked targets. This unblocks authoring the
+`OptiscanGroup` / `ViloForge` → `Azure Infrastructure` →
+progressive-detail tree against `~/.mykb` on the personal wiki
+(:8881 later; :8181 interim) — that authoring work remains
+paused/next, by the user's call. RunbookFrontend recorded as still
+NOT built (DESIGN §17), same accepted-but-unbuilt shape, so it is
+not implied-done.
+
 ### 2026-05-16 — Discussion paused
 
 Resolved so far: #3, #5, #6, #7, #8, #11 (6 of 11). Still OPEN:
