@@ -110,6 +110,39 @@ func TestBuild_Deterministic(t *testing.T) {
 	}
 }
 
+func TestBuild_SectionDesc_RendersBlurbBeforeLinks(t *testing.T) {
+	s := specs.Spec{
+		ID: "h", Wiki: "personal", Page: "P", Kind: "hub", Hash: "h",
+		Hub: &specs.HubSpec{Sections: []specs.HubSection{
+			{Title: "Core", Desc: "Focus: the base layer everything depends on.",
+				Links: []specs.HubLink{{Page: "P/Net", Label: "Net"}}},
+			{Title: "NoBlurb", Links: []specs.HubLink{{Page: "P/X"}}},
+		}},
+	}
+	doc, err := hub.New().Build(context.Background(), s, kb.Snapshot{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	core := doc.Sections[0]
+	if len(core.Blocks) != 2 {
+		t.Fatalf("section with desc should have 2 blocks (blurb + index), got %d", len(core.Blocks))
+	}
+	pb, ok := core.Blocks[0].(ir.ProseBlock)
+	if !ok || pb.Text != "Focus: the base layer everything depends on." {
+		t.Errorf("block0 should be the blurb ProseBlock, got %T %+v", core.Blocks[0], core.Blocks[0])
+	}
+	if _, ok := core.Blocks[1].(ir.IndexBlock); !ok {
+		t.Errorf("block1 should be the IndexBlock, got %T", core.Blocks[1])
+	}
+	noBlurb := doc.Sections[1]
+	if len(noBlurb.Blocks) != 1 {
+		t.Errorf("section without desc should have only the IndexBlock, got %d blocks", len(noBlurb.Blocks))
+	}
+	if _, ok := noBlurb.Blocks[0].(ir.IndexBlock); !ok {
+		t.Errorf("no-desc section block0 should be IndexBlock, got %T", noBlurb.Blocks[0])
+	}
+}
+
 func TestBuild_NilHub_Errors(t *testing.T) {
 	_, err := hub.New().Build(context.Background(),
 		specs.Spec{ID: "x", Kind: "hub"}, kb.Snapshot{})

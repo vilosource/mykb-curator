@@ -61,6 +61,7 @@ type frontmatter struct {
 type hubYAML struct {
 	Sections []struct {
 		Title string `yaml:"title"`
+		Desc  string `yaml:"desc"`
 		Links []struct {
 			Page  string `yaml:"page"`
 			Label string `yaml:"label"`
@@ -147,7 +148,7 @@ func toHubSpec(h *hubYAML) *specs.HubSpec {
 	}
 	hs := &specs.HubSpec{}
 	for _, sec := range h.Sections {
-		s := specs.HubSection{Title: sec.Title}
+		s := specs.HubSection{Title: sec.Title, Desc: sec.Desc}
 		for _, l := range sec.Links {
 			s.Links = append(s.Links, specs.HubLink{
 				Page: l.Page, Label: l.Label, Desc: l.Desc, Area: l.Area,

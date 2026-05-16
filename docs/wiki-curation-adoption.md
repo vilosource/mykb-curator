@@ -145,6 +145,36 @@ MutationProposals → PR via prbackend, intended to run nightly. So
 the brain self-curates; the human architects new pages + reviews
 proposals.
 
+### 2026-05-16 — Process issue: maintainability is per-layer
+
+User questioned whether "specs written → maintainable wiki" holds.
+Read the real `wiki.optiscangroup.com/Azure_Infrastructure` via the
+read-only MediaWiki MCP to base specs off its actual IA (a hub:
+intro + 5 sections × described links + per-section "Focus:" blurb;
+"Tenant & Subscriptions" is a *linked sub-page*, not inline —
+user's instinct flagged my 4-link stub, not a wrong page type).
+
+Conclusion (recorded so it is not hand-waved):
+- **Structural/index pages (hub, projection): spec-sufficient
+  today.** Deterministic, link-checked, descriptions auto-refresh
+  from mykb. Azure_Infrastructure is this layer.
+- **Substantive content pages (editorial): spec necessary but NOT
+  sufficient.** Gated by three things not in the spec — (1) brain
+  completeness (irreducibly human; resolved #3), (2) synthesis
+  quality (Judge, deferred v2), (3) currency vs reality
+  (az-reality-probe, deferred v2). Until 2+3 land, a human reviews
+  content pages.
+- Net: the curator already shrinks the job to "keep mykb
+  correct + review regenerated pages" — strictly smaller/higher
+  leverage; the residual is exactly the two tracked v2 items plus
+  the permanent human core. Not broken — partially built.
+- Bounded enhancement done this slice: hub `section.desc` (the
+  "Focus:" blurb). Sidebars/quick-links/category = nav-redundant
+  styling, intentionally skipped.
+- Leaf model decided: **projection by default**; promote
+  individual pages to editorial only where narrative matters,
+  accepting the review residual there consciously.
+
 ### 2026-05-16 — Hub frontend built (IA keystone, no shortcuts)
 
 User chose the long-term solution over fake/editorial hubs. The

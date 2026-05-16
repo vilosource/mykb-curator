@@ -62,6 +62,7 @@ type HubSpec struct {
 // HubSection is one labelled group of links on a hub page.
 type HubSection struct {
 	Title string
+	Desc  string // optional "Focus:" blurb rendered under the heading
 	Links []HubLink
 }
 

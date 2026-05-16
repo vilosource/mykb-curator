@@ -82,16 +82,29 @@ func (*Frontend) Build(_ context.Context, spec specs.Spec, snap kb.Snapshot) (ir
 				Desc:  desc,
 			})
 		}
+		blocks := make([]ir.Block, 0, 2)
+		if d := strings.TrimSpace(sec.Desc); d != "" {
+			// The per-section "Focus:" blurb. ProseBlock so a human
+			// can polish it; it sits above the link list.
+			blocks = append(blocks, ir.ProseBlock{
+				Text: d,
+				Prov: ir.Provenance{
+					SpecSection: fmt.Sprintf("hub.section[%d].desc", i),
+					InputHash:   hashStr(d),
+				},
+			})
+		}
+		blocks = append(blocks, ir.IndexBlock{
+			Entries: entries,
+			Prov: ir.Provenance{
+				SpecSection: fmt.Sprintf("hub.section[%d]", i),
+				Sources:     sources,
+				InputHash:   hashEntries(entries),
+			},
+		})
 		doc.Sections = append(doc.Sections, ir.Section{
 			Heading: sec.Title,
-			Blocks: []ir.Block{ir.IndexBlock{
-				Entries: entries,
-				Prov: ir.Provenance{
-					SpecSection: fmt.Sprintf("hub.section[%d]", i),
-					Sources:     sources,
-					InputHash:   hashEntries(entries),
-				},
-			}},
+			Blocks:  blocks,
 		})
 	}
 
