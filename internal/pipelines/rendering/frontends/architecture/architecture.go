@@ -8,12 +8,14 @@
 // the page audience. The hard-won markdown→IR handling is shared via
 // the mdir package.
 //
-// Scope: prose sections are LLM-synthesised from kb: sources;
-// render:table is rendered deterministically from sources (kb rows
-// now, a declared "pending" row for git/cmd/ssh/file until slice 4);
+// Scope: prose sections are LLM-synthesised from kb: sources plus
+// any non-kb source a configured resolver can ground (today: the
+// read-only git: resolver); render:table is rendered
+// deterministically (kb rows + resolver rows; a declared "pending"
+// row for schemes with no resolver — cmd/ssh/az until slice 4b);
 // render:child-index emits an empty, position-correct placeholder
-// the cluster orchestrator fills with the topic's children. Non-kb
-// source contents are declared, never fabricated.
+// the cluster orchestrator fills with the topic's children. Source
+// contents are always declared, never fabricated.
 package architecture
 
 import (
@@ -27,18 +29,29 @@ import (
 	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/mdir"
+	"github.com/vilosource/mykb-curator/internal/sources"
 	"github.com/vilosource/mykb-curator/internal/specs/docspec"
 )
 
 // Frontend renders an architecture/runbook/integration DocPage.
 type Frontend struct {
-	llm   llm.Client
-	model string
+	llm       llm.Client
+	model     string
+	resolvers map[string]sources.Resolver // by scheme; nil = none
 }
 
-// New constructs a Frontend bound to an LLM client + model.
-func New(client llm.Client, model string) *Frontend {
-	return &Frontend{llm: client, model: model}
+// New constructs a Frontend bound to an LLM client + model. Optional
+// non-kb source resolvers (today: the read-only git: resolver) are
+// keyed by scheme; a scheme with no resolver keeps the honest
+// "pending" placeholder rather than fabricating.
+func New(client llm.Client, model string, resolvers ...sources.Resolver) *Frontend {
+	m := make(map[string]sources.Resolver, len(resolvers))
+	for _, r := range resolvers {
+		if r != nil {
+			m[r.Scheme()] = r
+		}
+	}
+	return &Frontend{llm: client, model: model, resolvers: m}
 }
 
 // Name returns "architecture-frontend".
@@ -74,14 +87,21 @@ func (f *Frontend) Render(ctx context.Context, page docspec.DocPage, snap kb.Sna
 			})
 			continue
 		case "table":
+			tbl, err := f.tableFromSources(ctx, sec, snap, secHash)
+			if err != nil {
+				return ir.Document{}, fmt.Errorf("architecture: section %q: %w", sec.Title, err)
+			}
 			doc.Sections = append(doc.Sections, ir.Section{
 				Heading: sec.Title,
-				Blocks:  []ir.Block{tableFromSources(sec, snap, secHash)},
+				Blocks:  []ir.Block{tbl},
 			})
 			continue
 		}
 
-		kbDigest, nonKB := f.resolveSources(sec.Sources, snap)
+		kbDigest, nonKB, err := f.resolveSources(ctx, sec.Sources, snap)
+		if err != nil {
+			return ir.Document{}, fmt.Errorf("architecture: section %q: %w", sec.Title, err)
+		}
 		prompt := composeSectionPrompt(page, sec, kbDigest, nonKB)
 		resp, err := f.llm.Complete(ctx, llm.Request{
 			Model:     f.model,
@@ -105,18 +125,25 @@ func (f *Frontend) Render(ctx context.Context, page docspec.DocPage, snap kb.Sna
 const ChildIndexProv = "architecture-child-index"
 
 // tableFromSources renders a render:table section deterministically
-// (no LLM): kb sources expand to one row per entry; sources whose
-// scheme is not yet machine-resolvable (git/cmd/ssh/file) produce a
+// (no LLM): kb sources expand to one row per entry; a non-kb scheme
+// with a configured resolver (today: git:) expands to that
+// resolver's rows; a non-kb scheme with no resolver produces a
 // single honest "pending" row — declared, never fabricated.
-func tableFromSources(sec docspec.DocSection, snap kb.Snapshot, hash string) ir.TableBlock {
+func (f *Frontend) tableFromSources(ctx context.Context, sec docspec.DocSection, snap kb.Snapshot, hash string) (ir.TableBlock, error) {
 	tb := ir.TableBlock{
 		Columns: []string{"Type", "Ref", "Summary"},
 		Prov:    ir.Provenance{SpecSection: "architecture-table", InputHash: hash},
 	}
 	for _, s := range sec.Sources {
 		if s.Scheme != "kb" {
+			if res, ok, err := f.resolveNonKB(ctx, s); err != nil {
+				return ir.TableBlock{}, err
+			} else if ok {
+				tb.Rows = append(tb.Rows, res.Rows...)
+				continue
+			}
 			tb.Rows = append(tb.Rows, []string{
-				s.Scheme, s.Spec, "pending — populated by the reality-probe resolver (slice 4)",
+				s.Scheme, s.Spec, "pending — no resolver configured for this scheme",
 			})
 			continue
 		}
@@ -128,7 +155,18 @@ func tableFromSources(sec docspec.DocSection, snap kb.Snapshot, hash string) ir.
 			tb.Rows = append(tb.Rows, []string{e.Type, a.ID + "/" + e.ID, firstLine(e.Text)})
 		}
 	}
-	return tb
+	return tb, nil
+}
+
+// resolveNonKB consults the configured resolver for a non-kb source.
+// ok=false means no resolver / resolver declined (keep pending); a
+// non-nil error is a hard failure that must abort the page.
+func (f *Frontend) resolveNonKB(ctx context.Context, s docspec.Source) (sources.Resolved, bool, error) {
+	r, has := f.resolvers[s.Scheme]
+	if !has {
+		return sources.Resolved{}, false, nil
+	}
+	return r.Resolve(ctx, s)
 }
 
 func firstLine(s string) string {
@@ -162,14 +200,27 @@ func foldSection(title string, parsed []ir.Section, hash string) []ir.Section {
 	return out
 }
 
-// resolveSources returns a kb digest string for kb: sources and the
-// list of non-kb source Raw strings (declared but not machine-
-// resolvable yet).
-func (f *Frontend) resolveSources(srcs []docspec.Source, snap kb.Snapshot) (string, []string) {
+// resolveSources returns the grounding digest (kb areas + any
+// resolver-resolved non-kb sources, e.g. git:) and the list of
+// non-kb source Raw strings still unresolved (no resolver) so the
+// prompt can declare them as pending without fabricating.
+func (f *Frontend) resolveSources(ctx context.Context, srcs []docspec.Source, snap kb.Snapshot) (string, []string, error) {
 	var digest strings.Builder
 	var nonKB []string
 	for _, s := range srcs {
 		if s.Scheme != "kb" {
+			res, ok, err := f.resolveNonKB(ctx, s)
+			if err != nil {
+				return "", nil, err
+			}
+			if ok {
+				digest.WriteString(res.Digest)
+				if !strings.HasSuffix(res.Digest, "\n") {
+					digest.WriteByte('\n')
+				}
+				digest.WriteByte('\n')
+				continue
+			}
 			nonKB = append(nonKB, s.Raw)
 			continue
 		}
@@ -189,7 +240,7 @@ func (f *Frontend) resolveSources(srcs []docspec.Source, snap kb.Snapshot) (stri
 		}
 		digest.WriteByte('\n')
 	}
-	return digest.String(), nonKB
+	return digest.String(), nonKB, nil
 }
 
 // ResolveKB resolves a `kb:area=<id> [tag=a,b] [zone=x,y]` source

@@ -9,8 +9,22 @@ import (
 	"github.com/vilosource/mykb-curator/internal/adapters/kb"
 	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
+	"github.com/vilosource/mykb-curator/internal/sources"
 	"github.com/vilosource/mykb-curator/internal/specs/docspec"
 )
+
+// fakeResolver is a deterministic non-kb source resolver for tests.
+type fakeResolver struct {
+	scheme string
+	res    sources.Resolved
+	ok     bool
+	err    error
+}
+
+func (f *fakeResolver) Scheme() string { return f.scheme }
+func (f *fakeResolver) Resolve(_ context.Context, _ docspec.Source) (sources.Resolved, bool, error) {
+	return f.res, f.ok, f.err
+}
 
 // seqLLM returns canned responses in order and records every prompt
 // it was given, so tests can assert per-section prompt composition.
@@ -217,6 +231,80 @@ func TestRender_LLMErrorIsFatal(t *testing.T) {
 	}
 	if _, err := New(llmC, "m").Render(context.Background(), page, vaultSnap()); err == nil {
 		t.Fatal("LLM error must fail the render — never push a half-empty page")
+	}
+}
+
+func TestRender_GitResolverGroundsProseAndTable(t *testing.T) {
+	gitR := &fakeResolver{
+		scheme: "git",
+		ok:     true,
+		res: sources.Resolved{
+			Digest: "### git: infra/vault @ abc123\nVAULT_RAFT_NODES=5\n",
+			Rows:   [][]string{{"file", "git:infra/vault@abc123:compose.yml", "vault:1.15"}},
+			Refs:   []string{"git:infra/vault@abc123"},
+		},
+	}
+	llmC := &seqLLM{resp: []string{"Synthesised from the repo."}}
+	page := docspec.DocPage{
+		Page: "P", Kind: "architecture",
+		Sections: []docspec.DocSection{
+			{Title: "Source Code", Render: "table", Sources: []docspec.Source{src(t, "git:infra/vault")}},
+			{Title: "Build", Intent: "How it is built.", Sources: []docspec.Source{src(t, "git:infra/vault")}},
+		},
+	}
+
+	doc, err := New(llmC, "m", gitR).Render(context.Background(), page, vaultSnap())
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	// render:table → resolver rows, NOT a pending row.
+	tbl := doc.Sections[0].Blocks[0].(ir.TableBlock)
+	if len(tbl.Rows) != 1 || tbl.Rows[0][1] != "git:infra/vault@abc123:compose.yml" {
+		t.Errorf("git rows must replace the pending row: %+v", tbl.Rows)
+	}
+	// prose section → resolver digest is in the prompt, and the
+	// source is NOT declared as unresolved.
+	p := llmC.seen[0].Prompt
+	if !strings.Contains(p, "VAULT_RAFT_NODES=5") {
+		t.Errorf("git digest must ground the prose prompt:\n%s", p)
+	}
+	if strings.Contains(p, "not yet machine-resolvable") {
+		t.Errorf("a resolved git source must not be declared pending:\n%s", p)
+	}
+}
+
+func TestRender_ResolverErrorIsFatal(t *testing.T) {
+	gitR := &fakeResolver{scheme: "git", err: errors.New("git boom")}
+	llmC := &seqLLM{resp: []string{"x"}}
+	page := docspec.DocPage{
+		Page: "P", Kind: "architecture",
+		Sections: []docspec.DocSection{
+			{Title: "Build", Intent: "i", Sources: []docspec.Source{src(t, "git:infra/vault")}},
+		},
+	}
+	if _, err := New(llmC, "m", gitR).Render(context.Background(), page, vaultSnap()); err == nil {
+		t.Fatal("a resolver hard error must abort the page, not silently degrade")
+	}
+}
+
+func TestRender_NoResolverForScheme_StaysPending(t *testing.T) {
+	// git resolver configured, but the source is ssh: → no resolver
+	// for that scheme → honest pending, no fabrication, no error.
+	gitR := &fakeResolver{scheme: "git", ok: true}
+	llmC := &seqLLM{resp: []string{"body"}}
+	page := docspec.DocPage{
+		Page: "P", Kind: "architecture",
+		Sections: []docspec.DocSection{
+			{Title: "Probe", Render: "table", Sources: []docspec.Source{src(t, "ssh:host=vault-1")}},
+		},
+	}
+	doc, err := New(llmC, "m", gitR).Render(context.Background(), page, vaultSnap())
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	tbl := doc.Sections[0].Blocks[0].(ir.TableBlock)
+	if len(tbl.Rows) != 1 || tbl.Rows[0][0] != "ssh" || !strings.Contains(tbl.Rows[0][2], "pending") {
+		t.Errorf("scheme without a resolver must stay an honest pending row: %+v", tbl.Rows)
 	}
 }
 
