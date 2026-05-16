@@ -547,6 +547,15 @@ func composeLLMClient(cfg *config.Config) (llm.Client, error) {
 		})
 		cacheDir := filepath.Join(llmCacheDir(cfg), "anthropic")
 		return llm.NewCacheDecorator(inner, cacheDir), nil
+	case "pi":
+		// Live Pi agent via the pi-harness shim. Endpoint is the
+		// harness base URL (config field documents "for pi: the
+		// pi-harness URL"). No API key here — Pi auth lives in the
+		// harness container's env.
+		if cfg.LLM.Endpoint == "" {
+			return nil, fmt.Errorf("llm.provider=pi requires llm.endpoint (the pi-harness URL)")
+		}
+		return llm.NewPiClient(cfg.LLM.Endpoint), nil
 	case "replay":
 		// Replay points at a directory of pre-recorded responses —
 		// used for tests and deterministic CI runs.
@@ -556,7 +565,7 @@ func composeLLMClient(cfg *config.Config) (llm.Client, error) {
 		}
 		return llm.NewReplayClient(dir), nil
 	default:
-		return nil, fmt.Errorf("llm.provider=%q: unknown (known: anthropic, replay, none)", cfg.LLM.Provider)
+		return nil, fmt.Errorf("llm.provider=%q: unknown (known: anthropic, pi, replay, none)", cfg.LLM.Provider)
 	}
 }
 
