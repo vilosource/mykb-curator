@@ -36,6 +36,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
 )
@@ -64,15 +65,31 @@ type Uploader interface {
 	UploadFile(ctx context.Context, filename string, content []byte, contentType, summary string) (assetRef string, err error)
 }
 
+// Repairer attempts to fix diagram source that failed to render. The
+// concrete LLMRepairer hands the bad source + the renderer's error
+// back to a model and returns its corrected diagram. Injected +
+// optional: nil ⇒ a failed render degrades straight to the
+// escape-hatch (no AI repair attempted).
+type Repairer interface {
+	Repair(ctx context.Context, lang, source, renderErr string) (fixed string, err error)
+}
+
 // RenderDiagrams is the Pass implementation.
 type RenderDiagrams struct {
-	r Renderer
-	u Uploader
+	r      Renderer
+	u      Uploader
+	repair Repairer // optional
 }
 
 // New constructs a RenderDiagrams pass over the given renderer and
-// uploader.
+// uploader, with no AI repair (failed renders degrade directly).
 func New(r Renderer, u Uploader) *RenderDiagrams { return &RenderDiagrams{r: r, u: u} }
+
+// NewWithRepairer adds an LLM repair step: a render failure is sent
+// back to the Repairer once and re-rendered before degrading.
+func NewWithRepairer(r Renderer, u Uploader, rep Repairer) *RenderDiagrams {
+	return &RenderDiagrams{r: r, u: u, repair: rep}
+}
 
 // Name returns "render-diagrams".
 func (*RenderDiagrams) Name() string { return "render-diagrams" }
@@ -109,17 +126,29 @@ func (p *RenderDiagrams) renderOne(ctx context.Context, db ir.DiagramBlock) (ir.
 
 	img, ctype, err := p.r.Render(ctx, db.Lang, db.Source)
 	if err != nil {
-		// Any render failure degrades to the escape-hatch: keep the
-		// source so the backend renders it as a code block, and
-		// continue. This covers both unsupported languages and
-		// malformed source — LLM-authored mermaid is frequently
-		// imperfect, and a single bad diagram must never abort an
-		// otherwise-good page. (Upload failures below are still
-		// hard: those mean the wiki target itself is broken, which
-		// would fail the page write anyway.)
-		return db, nil
+		// Unsupported language is not a fixable mermaid error — and
+		// with no repairer there is nothing else to try: degrade to
+		// the escape-hatch (keep the source; the backend renders a
+		// code block). A single bad diagram must never abort an
+		// otherwise-good page.
+		if errors.Is(err, ErrUnsupportedLang) || p.repair == nil {
+			return db, nil
+		}
+		// One AI repair attempt: hand the bad source + the render
+		// error to the model, then re-render its fix exactly once.
+		// Still bad ⇒ degrade.
+		fixed, rerr := p.repair.Repair(ctx, db.Lang, db.Source, err.Error())
+		if rerr != nil || strings.TrimSpace(fixed) == "" || fixed == db.Source {
+			return db, nil
+		}
+		img, ctype, err = p.r.Render(ctx, db.Lang, fixed)
+		if err != nil {
+			return db, nil
+		}
 	}
 
+	// Filename keys on the ORIGINAL source so re-runs stay idempotent
+	// even though AI-repaired output is non-deterministic.
 	filename := assetFilename(db.Lang, db.Source)
 	summary := "curator: render diagram"
 	if db.Prov.SpecSection != "" {

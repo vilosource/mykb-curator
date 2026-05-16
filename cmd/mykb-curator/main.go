@@ -158,7 +158,11 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 	// Pass pipeline is per-run because ResolveKBRefs closes over the
 	// kb snapshot. ValidateLinks's known-pages map is built from the
 	// loaded specs (every spec.Page is a known target).
-	buildPasses := composePassPipeline(specStore, wikiTarget, renderdiagrams.NewMermaidRenderer(""), cfg.Style)
+	var diagramRepairer renderdiagrams.Repairer
+	if llmClient != nil {
+		diagramRepairer = renderdiagrams.NewLLMRepairer(llmClient, cfg.LLM.Model)
+	}
+	buildPasses := composePassPipeline(specStore, wikiTarget, renderdiagrams.NewMermaidRenderer(""), diagramRepairer, cfg.Style)
 
 	onRendered := composeOnRenderedSink(ctx, cfg, wikiTarget, outDir)
 
@@ -345,8 +349,14 @@ func makeWikiUpsertSink(ctx context.Context, target wikipkg.Target) func(string,
 // RenderDiagrams runs before ApplyZoneMarkers (DESIGN.md §5.4) so the
 // markers wrap the final asset-ref'd diagram block; ValidateLinks
 // runs last so it catches links in resolved content too.
-func composePassPipeline(specStore specs.Store, uploader renderdiagrams.Uploader, renderer renderdiagrams.Renderer, style config.StyleConfig) func(kbpkg.Snapshot) *passes.Pipeline {
+func composePassPipeline(specStore specs.Store, uploader renderdiagrams.Uploader, renderer renderdiagrams.Renderer, repairer renderdiagrams.Repairer, style config.StyleConfig) func(kbpkg.Snapshot) *passes.Pipeline {
 	styleRules := buildStyleRules(style)
+	diagrams := renderdiagrams.New(renderer, uploader)
+	if repairer != nil {
+		// An LLM is configured — let it repair diagrams that fail to
+		// render instead of degrading them to code blocks.
+		diagrams = renderdiagrams.NewWithRepairer(renderer, uploader, repairer)
+	}
 	return func(snap kbpkg.Snapshot) *passes.Pipeline {
 		// Build known-pages map from the loaded specs. Best-effort:
 		// any pull failure leaves the map empty, which ValidateLinks
@@ -355,7 +365,7 @@ func composePassPipeline(specStore specs.Store, uploader renderdiagrams.Uploader
 		return passes.NewPipeline(
 			resolvekbrefs.New(snap),
 			applystylerules.New(styleRules...),
-			renderdiagrams.New(renderer, uploader),
+			diagrams,
 			zonemarkers.New(),
 			validatelinks.New(known),
 		)
