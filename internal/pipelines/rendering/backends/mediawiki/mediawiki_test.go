@@ -78,6 +78,37 @@ func TestRender_ProseIsBlankLineSeparatedParagraph(t *testing.T) {
 	}
 }
 
+func TestRender_MultiParagraphProse_NotMerged(t *testing.T) {
+	doc := ir.Document{Sections: []ir.Section{{
+		Heading: "S",
+		Blocks:  []ir.Block{ir.ProseBlock{Text: "Para one\nwrapped.\n\nPara two."}},
+	}}}
+	out, _ := mediawiki.New().Render(doc)
+	s := string(out)
+	if !strings.Contains(s, "Para one wrapped.\n\nPara two.") {
+		t.Errorf("paragraphs merged or wrap not joined:\n%s", s)
+	}
+}
+
+func TestRender_LeadingMarkupGuarded(t *testing.T) {
+	// Residual markdown the frontend didn't strip must not render as
+	// a wikitext list/heading.
+	doc := ir.Document{Sections: []ir.Section{{
+		Heading: "S",
+		Blocks:  []ir.Block{ir.ProseBlock{Text: "# leaked heading text"}},
+	}}}
+	out, _ := mediawiki.New().Render(doc)
+	s := string(out)
+	if !strings.Contains(s, "<nowiki/># leaked heading text") {
+		t.Errorf("leading markup not guarded with <nowiki/>:\n%s", s)
+	}
+	for _, line := range strings.Split(s, "\n") {
+		if strings.HasPrefix(line, "#") {
+			t.Errorf("unguarded markup line leaked: %q", line)
+		}
+	}
+}
+
 func TestRender_MarkerBlocks_AreInertHTMLComments(t *testing.T) {
 	// Reconciler depends on the EXACT marker convention; it must be
 	// byte-identical to the markdown backend's (HTML comments are

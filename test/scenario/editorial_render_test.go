@@ -14,7 +14,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki/mediawiki"
 	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/orchestrator"
-	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends/markdown"
+	mwbackend "github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends/mediawiki"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/editorial"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/projection"
@@ -88,7 +88,7 @@ func TestScenario_EditorialRender_AgainstRealMediaWiki(t *testing.T) {
 		BuildPasses: func(_ kb.Snapshot) *passes.Pipeline {
 			return passes.NewPipeline(zonemarkers.New())
 		},
-		Backend: markdown.New(),
+		Backend: mwbackend.New(),
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -122,6 +122,8 @@ func TestScenario_EditorialRender_AgainstRealMediaWiki(t *testing.T) {
 		"VAULT-001",
 		"Raft backend was chosen over Consul",
 	})
+	// Structure, not just substrings — the missing assertion.
+	verifyRenderedStructure(t, mw.URL, "Azure_Infrastructure")
 }
 
 // Sanity check: the fixed response parses cleanly when fed through

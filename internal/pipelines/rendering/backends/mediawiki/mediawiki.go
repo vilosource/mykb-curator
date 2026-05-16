@@ -119,20 +119,30 @@ func writeBlock(buf *bytes.Buffer, blk ir.Block) {
 	}
 }
 
-// writeParagraph emits text as a wikitext paragraph. A blank line
-// terminates the paragraph; single newlines inside the text are
-// collapsed to spaces so the source's hard-wraps don't fragment the
-// rendered paragraph (MediaWiki treats a lone newline as a space,
-// but normalising keeps the wikitext clean and diff-stable).
+// writeParagraph emits prose as one or more wikitext paragraphs.
+//
+// Blank lines split paragraphs (a paragraph is NOT merged across
+// them — collapsing everything into one physical line was a bug: a
+// single line that begins with #/*/:/;/= is wikitext markup, so
+// merged prose containing such a line rendered as a list/heading).
+// Within a paragraph, hard-wrapped lines are joined with a space
+// (MediaWiki treats a lone newline as a space anyway). If a
+// paragraph still begins with a wikitext-significant character
+// (residual markdown the frontend didn't strip), it is guarded with
+// <nowiki/> so it renders as the literal text the author wrote.
 func writeParagraph(buf *bytes.Buffer, text string) {
-	t := strings.TrimSpace(text)
-	if t == "" {
-		return
+	t := strings.ReplaceAll(text, "\r\n", "\n")
+	for _, para := range strings.Split(t, "\n\n") {
+		joined := strings.Join(strings.Fields(strings.ReplaceAll(para, "\n", " ")), " ")
+		if joined == "" {
+			continue
+		}
+		if strings.ContainsRune("#*:;=|!", rune(joined[0])) {
+			buf.WriteString("<nowiki/>")
+		}
+		buf.WriteString(joined)
+		buf.WriteString("\n\n")
 	}
-	t = strings.ReplaceAll(t, "\r\n", "\n")
-	t = strings.Join(strings.Fields(strings.ReplaceAll(t, "\n", " ")), " ")
-	buf.WriteString(t)
-	buf.WriteString("\n\n")
 }
 
 // writeMarkerBlock renders the zone boundary identically to the

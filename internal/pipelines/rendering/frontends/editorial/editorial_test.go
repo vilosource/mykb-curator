@@ -2,6 +2,7 @@ package editorial
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -119,6 +120,33 @@ Three-node HA cluster.
 		t.Errorf("Sections[0].Blocks[0] is not ProseBlock: %T", doc.Sections[0].Blocks[0])
 	} else if !strings.Contains(p.Text, "secrets manager") {
 		t.Errorf("prose content lost: %q", p.Text)
+	}
+}
+
+// LLMs do not perfectly obey "use ## only" — gemini emitted ### sub
+// headings live, which parseMarkdown used to dump verbatim into a
+// ProseBlock, leaking raw "### Vault" markdown into the wiki. Any
+// ATX heading level (## … ######) must start a section so no
+// heading markup ever survives into prose.
+func TestBuild_DeeperHeadingsBecomeSections(t *testing.T) {
+	llmC := &stubLLM{resp: "## Stacks\n\n### Vault\n\nVault prose.\n\n### Harbor\n\nHarbor prose.\n"}
+	doc, err := New(llmC, "m").Build(context.Background(),
+		specs.Spec{Wiki: "acme", Page: "P", Kind: "editorial", Hash: "h"}, kb.Snapshot{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	var headings []string
+	for _, s := range doc.Sections {
+		headings = append(headings, s.Heading)
+		for _, b := range s.Blocks {
+			if p, ok := b.(ir.ProseBlock); ok && strings.Contains(p.Text, "#") {
+				t.Errorf("heading markup leaked into prose: %q", p.Text)
+			}
+		}
+	}
+	want := []string{"Stacks", "Vault", "Harbor"}
+	if !reflect.DeepEqual(headings, want) {
+		t.Errorf("headings = %v, want %v", headings, want)
 	}
 }
 

@@ -156,8 +156,15 @@ func parseMarkdown(md, specHash string) []ir.Section {
 	}
 
 	for _, line := range lines {
-		if strings.HasPrefix(line, "## ") {
-			startSection(strings.TrimSpace(strings.TrimPrefix(line, "## ")))
+		// Any ATX heading (## … ######) starts a section. LLMs don't
+		// reliably restrict themselves to ## despite the system
+		// prompt; treating only ## as a boundary leaked "### Foo"
+		// markdown verbatim into prose (and thence as broken
+		// wikitext). Hierarchy is flattened — the IR Section model is
+		// flat — which is acceptable and far better than leaked
+		// markup; preserving depth is a future IR change.
+		if h, ok := atxHeading(line); ok {
+			startSection(h)
 			continue
 		}
 		buf.WriteString(line)
@@ -168,4 +175,20 @@ func parseMarkdown(md, specHash string) []ir.Section {
 		sections = append(sections, current)
 	}
 	return sections
+}
+
+// atxHeading reports whether line is a markdown ATX heading of level
+// 2–6 (## … ######) and, if so, returns the trimmed heading text.
+// Level 1 (#) is intentionally not a section boundary — the page
+// title is set separately and the system prompt forbids #.
+func atxHeading(line string) (string, bool) {
+	s := strings.TrimRight(line, " \t")
+	n := 0
+	for n < len(s) && s[n] == '#' {
+		n++
+	}
+	if n < 2 || n > 6 || n >= len(s) || s[n] != ' ' {
+		return "", false
+	}
+	return strings.TrimSpace(s[n+1:]), true
 }

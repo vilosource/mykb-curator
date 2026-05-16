@@ -32,7 +32,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki/mediawiki"
 	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/orchestrator"
-	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends/markdown"
+	mwbackend "github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends/mediawiki"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/projection"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes"
@@ -85,7 +85,7 @@ func TestScenario_FirstRender_ProjectionAgainstRealMediaWiki(t *testing.T) {
 		BuildPasses: func(_ kb.Snapshot) *passes.Pipeline {
 			return passes.NewPipeline(zonemarkers.New())
 		},
-		Backend: markdown.New(),
+		Backend: mwbackend.New(),
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -119,6 +119,9 @@ func TestScenario_FirstRender_ProjectionAgainstRealMediaWiki(t *testing.T) {
 		"Vault runs as an HA", // a fact from the fixture facts.jsonl
 		"VAULT-001",           // a decision id from decisions.jsonl
 	})
+	// The assertion the suite was missing: not just "words present"
+	// but "rendered as correct MediaWiki structure".
+	verifyRenderedStructure(t, mw.URL, "Area/Vault_Architecture")
 }
 
 // verifyPageLanded fetches the rendered HTML of a wiki page directly
@@ -145,6 +148,49 @@ func verifyPageLanded(t *testing.T, wikiURL, title string, wantSubstrings []stri
 			t.Errorf("page %q missing %q in wikitext\n---\n%s\n---", title, want, bodyStr)
 		}
 	}
+}
+
+// verifyRenderedStructure fetches the *rendered HTML* (not raw
+// wikitext) and asserts the page is structurally correct MediaWiki —
+// the assertion the suite was missing. verifyPageLanded only checks
+// wikitext substrings, so Markdown-into-MediaWiki "passed" (the
+// words were present) while every heading rendered as a list item.
+// This fails loudly on that.
+func verifyRenderedStructure(t *testing.T, wikiURL, title string) {
+	t.Helper()
+	apiURL := wikiURL + "/api.php?action=parse&page=" + title + "&prop=text&format=json"
+	resp, err := http.Get(apiURL)
+	if err != nil {
+		t.Fatalf("GET %s: %v", apiURL, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b := new(strings.Builder)
+	_, _ = io.Copy(b, resp.Body)
+	html := b.String()
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET %s: status=%d", apiURL, resp.StatusCode)
+	}
+	// Real section headings → <h2> in the parsed HTML.
+	if !strings.Contains(html, "<h2") {
+		t.Errorf("page %q has no <h2> heading in rendered HTML — sections not rendered as headings\n%s", title, truncate(html, 800))
+	}
+	// No markdown artifacts surviving into the rendered HTML.
+	for _, bad := range []string{"## ", "### ", "&lt;h2&gt;"} {
+		if strings.Contains(html, bad) {
+			t.Errorf("markdown artifact %q present in rendered HTML of %q\n%s", bad, title, truncate(html, 800))
+		}
+	}
+	// The YAML frontmatter fence must never reach rendered output.
+	if strings.Contains(html, "spec_hash:") || strings.Contains(html, "<p>---") {
+		t.Errorf("YAML frontmatter leaked into rendered HTML of %q\n%s", title, truncate(html, 800))
+	}
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 // stubLLM is a minimal LLM placeholder — scenario doesn't use

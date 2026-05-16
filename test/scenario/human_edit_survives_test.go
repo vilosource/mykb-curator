@@ -15,7 +15,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/adapters/specs/localfs"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki/mediawiki"
 	"github.com/vilosource/mykb-curator/internal/orchestrator"
-	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends/markdown"
+	mwbackend "github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends/mediawiki"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/editorial"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/projection"
@@ -66,7 +66,7 @@ func TestScenario_HumanEditSurvivesReRender(t *testing.T) {
 			BuildPasses: func(_ kb.Snapshot) *passes.Pipeline {
 				return passes.NewPipeline(zonemarkers.New())
 			},
-			Backend: markdown.New(),
+			Backend: mwbackend.New(),
 		})
 	}
 
