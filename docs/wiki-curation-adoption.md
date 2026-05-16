@@ -78,7 +78,12 @@ Status legend: **OPEN** (not yet discussed) · **DISCUSSING** ·
 6. **Agent reliability / evidence.** An LLM reading az/kubectl
    output can be wrong; proposals must carry primary evidence
    (exact command + raw output + timestamp); humans review evidence,
-   not the verdict. — **OPEN**
+   not the verdict. — **RESOLVED 2026-05-16**: evidence is
+   MANDATORY — a proposal with no primary evidence (exact command +
+   redacted raw output + timestamp) is not allowed; the reviewer
+   judges the evidence, not the agent's conclusion. Structurally
+   already supported by `MutationProposal.Evidence`; this is the
+   enforced policy. Completes #5.
 7. **Probe-eligibility of knowledge.** Empirical facts (versions,
    topology, what's deployed) are checkable; decisions/rationale/
    intent are not. Scope the check (tags/zones) to avoid false
@@ -133,6 +138,15 @@ LinkRotCheck, ExternalTruthCheck) already turns that into
 MutationProposals → PR via prbackend, intended to run nightly. So
 the brain self-curates; the human architects new pages + reviews
 proposals.
+
+### 2026-05-16 — Issue #6 (agent reliability / evidence) — RESOLVED
+
+Evidence is mandatory: no primary evidence (exact command +
+redacted raw output + timestamp) → no proposal. The reviewer
+judges the receipts, not the agent's verdict. Already supported
+by `MutationProposal.Evidence`; this fixes it as enforced policy.
+Completes the "leaves a sticky note with exactly what it saw" half
+of #5.
 
 ### 2026-05-16 — Issue #5 (fact-checking agent safety) — RESOLVED
 
