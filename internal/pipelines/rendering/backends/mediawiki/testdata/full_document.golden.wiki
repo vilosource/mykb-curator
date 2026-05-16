@@ -12,9 +12,9 @@ data
 <!-- CURATOR:END block=rg-table -->
 == Topology ==
 
-<syntaxhighlight lang="mermaid">
-graph TD; A-->B;
-</syntaxhighlight>
+<pre>
+graph TD; A--&gt;B;
+</pre>
 
 == Notes ==
 

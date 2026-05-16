@@ -109,6 +109,73 @@ func TestRender_LeadingMarkupGuarded(t *testing.T) {
 	}
 }
 
+func TestRender_MarkdownInlineConvertedToWikitext(t *testing.T) {
+	doc := ir.Document{Sections: []ir.Section{{
+		Heading: "S",
+		Blocks:  []ir.Block{ir.ProseBlock{Text: "Use **Vault** for _secrets_ via the `kv` engine; see [the docs](https://x.test)."}},
+	}}}
+	out := string(mustRender(t, doc))
+	for _, want := range []string{"'''Vault'''", "''secrets''", "<code>kv</code>", "[https://x.test the docs]"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "**Vault**") || strings.Contains(out, "](https://") {
+		t.Errorf("raw markdown leaked:\n%s", out)
+	}
+}
+
+func TestRender_MarkdownBulletListConverted(t *testing.T) {
+	doc := ir.Document{Sections: []ir.Section{{
+		Heading: "S",
+		Blocks:  []ir.Block{ir.ProseBlock{Text: "Intro line\n\n- first **item**\n- second item\n\nAfter."}},
+	}}}
+	out := string(mustRender(t, doc))
+	if !strings.Contains(out, "\n* first '''item'''\n* second item\n") {
+		t.Errorf("bullets not converted to wikitext list:\n%s", out)
+	}
+	if strings.Contains(out, "- first") {
+		t.Errorf("raw markdown bullet leaked:\n%s", out)
+	}
+}
+
+func TestRender_MarkdownNumberedListConverted(t *testing.T) {
+	doc := ir.Document{Sections: []ir.Section{{
+		Heading: "S",
+		Blocks:  []ir.Block{ir.ProseBlock{Text: "1. step one\n2. step two\n"}},
+	}}}
+	out := string(mustRender(t, doc))
+	if !strings.Contains(out, "\n# step one\n# step two\n") {
+		t.Errorf("numbered list not converted:\n%s", out)
+	}
+}
+
+func TestRender_DegradedDiagramUsesCorePre(t *testing.T) {
+	// <syntaxhighlight> needs an uninstalled extension; a degraded /
+	// unsupported diagram must fall back to core <pre> so it renders
+	// cleanly on a vanilla wiki.
+	doc := ir.Document{Sections: []ir.Section{{
+		Heading: "Topology",
+		Blocks:  []ir.Block{ir.DiagramBlock{Lang: "mermaid", Source: "graph LR; A-->B"}},
+	}}}
+	out := string(mustRender(t, doc))
+	if !strings.Contains(out, "<pre>") || !strings.Contains(out, "graph LR; A--&gt;B") {
+		t.Errorf("degraded diagram should be HTML-escaped inside <pre>:\n%s", out)
+	}
+	if strings.Contains(out, "<syntaxhighlight") {
+		t.Errorf("must not emit <syntaxhighlight> (extension not guaranteed):\n%s", out)
+	}
+}
+
+func mustRender(t *testing.T, d ir.Document) []byte {
+	t.Helper()
+	out, err := mediawiki.New().Render(d)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	return out
+}
+
 func TestRender_MarkerBlocks_AreInertHTMLComments(t *testing.T) {
 	// Reconciler depends on the EXACT marker convention; it must be
 	// byte-identical to the markdown backend's (HTML comments are

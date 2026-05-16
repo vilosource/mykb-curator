@@ -36,6 +36,7 @@ package mediawiki
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
@@ -131,11 +132,19 @@ func writeBlock(buf *bytes.Buffer, blk ir.Block) {
 // (residual markdown the frontend didn't strip), it is guarded with
 // <nowiki/> so it renders as the literal text the author wrote.
 func writeParagraph(buf *bytes.Buffer, text string) {
-	t := strings.ReplaceAll(text, "\r\n", "\n")
-	for _, para := range strings.Split(t, "\n\n") {
-		joined := strings.Join(strings.Fields(strings.ReplaceAll(para, "\n", " ")), " ")
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	var para []string
+	inList := false
+
+	flushPara := func() {
+		if len(para) == 0 {
+			return
+		}
+		joined := strings.Join(para, " ")
+		para = para[:0]
+		joined = mdInline(joined)
 		if joined == "" {
-			continue
+			return
 		}
 		if strings.ContainsRune("#*:;=|!", rune(joined[0])) {
 			buf.WriteString("<nowiki/>")
@@ -143,6 +152,85 @@ func writeParagraph(buf *bytes.Buffer, text string) {
 		buf.WriteString(joined)
 		buf.WriteString("\n\n")
 	}
+	endList := func() {
+		if inList {
+			buf.WriteByte('\n')
+			inList = false
+		}
+	}
+
+	for _, ln := range lines {
+		trimmed := strings.TrimSpace(ln)
+		if trimmed == "" {
+			flushPara()
+			endList()
+			continue
+		}
+		if item, ok := bulletItem(trimmed); ok {
+			flushPara()
+			inList = true
+			fmt.Fprintf(buf, "* %s\n", mdInline(item))
+			continue
+		}
+		if item, ok := numberedItem(trimmed); ok {
+			flushPara()
+			inList = true
+			fmt.Fprintf(buf, "# %s\n", mdInline(item))
+			continue
+		}
+		endList()
+		para = append(para, trimmed)
+	}
+	flushPara()
+	endList()
+}
+
+var (
+	reBullet   = regexp.MustCompile(`^[-*+]\s+(.*)$`)
+	reNumbered = regexp.MustCompile(`^\d+[.)]\s+(.*)$`)
+	reMDLink   = regexp.MustCompile(`\[([^\]]+)\]\(([^)\s]+)\)`)
+	reMDBold   = regexp.MustCompile(`(?:\*\*|__)([^*_]+?)(?:\*\*|__)`)
+	reMDItalic = regexp.MustCompile(`(?:\*|_)([^*_]+?)(?:\*|_)`)
+	reMDCode   = regexp.MustCompile("`([^`]+?)`")
+)
+
+func bulletItem(s string) (string, bool) {
+	m := reBullet.FindStringSubmatch(s)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+func numberedItem(s string) (string, bool) {
+	m := reNumbered.FindStringSubmatch(s)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// mdInline converts the markdown inline syntax LLMs reliably emit
+// (despite the prose-only prompt) into wikitext: links → [url text],
+// **bold**/__bold__ → ”'…”', *italic*/_italic_ → ”…”, `code` →
+// <code>…</code>. Code spans are protected first so their contents
+// are not re-processed as emphasis.
+func mdInline(s string) string {
+	type tok struct{ ph, val string }
+	var toks []tok
+	s = reMDCode.ReplaceAllStringFunc(s, func(m string) string {
+		inner := reMDCode.FindStringSubmatch(m)[1]
+		ph := fmt.Sprintf("\x00C%d\x00", len(toks))
+		toks = append(toks, tok{ph, "<code>" + inner + "</code>"})
+		return ph
+	})
+	s = reMDLink.ReplaceAllString(s, "[$2 $1]")
+	s = reMDBold.ReplaceAllString(s, "'''$1'''")
+	s = reMDItalic.ReplaceAllString(s, "''$1''")
+	for _, t := range toks {
+		s = strings.ReplaceAll(s, t.ph, t.val)
+	}
+	return s
 }
 
 // writeMarkerBlock renders the zone boundary identically to the
@@ -199,9 +287,13 @@ func writeDiagram(buf *bytes.Buffer, b ir.DiagramBlock) {
 		fmt.Fprintf(buf, "[[File:%s]]\n\n", ref)
 		return
 	}
-	// Unrendered source (RenderDiagrams not run / unsupported lang):
-	// keep it visible + non-interpreted.
-	fmt.Fprintf(buf, "<syntaxhighlight lang=\"%s\">\n%s\n</syntaxhighlight>\n\n", b.Lang, strings.TrimRight(b.Source, "\n"))
+	// Unrendered source (RenderDiagrams degraded / unsupported lang):
+	// keep it visible + non-interpreted using CORE <pre> —
+	// <syntaxhighlight> needs the SyntaxHighlight extension which a
+	// vanilla wiki does not have (it would render as literal text).
+	src := strings.TrimRight(b.Source, "\n")
+	src = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(src)
+	fmt.Fprintf(buf, "<pre>\n%s\n</pre>\n\n", src)
 }
 
 func writeCallout(buf *bytes.Buffer, b ir.Callout) {
