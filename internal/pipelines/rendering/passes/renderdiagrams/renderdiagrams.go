@@ -108,11 +108,16 @@ func (p *RenderDiagrams) renderOne(ctx context.Context, db ir.DiagramBlock) (ir.
 	}
 
 	img, ctype, err := p.r.Render(ctx, db.Lang, db.Source)
-	if errors.Is(err, ErrUnsupportedLang) {
-		return db, nil // escape-hatch: leave raw source for the backend
-	}
 	if err != nil {
-		return db, fmt.Errorf("renderdiagrams: render %q: %w", db.Lang, err)
+		// Any render failure degrades to the escape-hatch: keep the
+		// source so the backend renders it as a code block, and
+		// continue. This covers both unsupported languages and
+		// malformed source — LLM-authored mermaid is frequently
+		// imperfect, and a single bad diagram must never abort an
+		// otherwise-good page. (Upload failures below are still
+		// hard: those mean the wiki target itself is broken, which
+		// would fail the page write anyway.)
+		return db, nil
 	}
 
 	filename := assetFilename(db.Lang, db.Source)

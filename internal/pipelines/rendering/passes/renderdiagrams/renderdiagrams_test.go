@@ -176,12 +176,25 @@ func TestUnsupportedLang_EscapeHatchPassthrough(t *testing.T) {
 	}
 }
 
-func TestRendererHardError_Propagates(t *testing.T) {
-	boom := errors.New("mmdc exploded")
-	p := renderdiagrams.New(&fakeRenderer{err: boom}, &fakeUploader{})
-	_, err := p.Apply(context.Background(), docWith(ir.DiagramBlock{Lang: "mermaid", Source: "g"}))
-	if !errors.Is(err, boom) {
-		t.Errorf("expected wrapped renderer error, got %v", err)
+// A render failure (e.g. mmdc exit 1 on malformed LLM-authored
+// mermaid) must DEGRADE, not abort the page: the block keeps its
+// source (backend renders it as a code block) and the pass returns
+// no error. A single bad diagram nuking an otherwise-good page is
+// unacceptable for agent-generated content.
+func TestRendererError_DegradesNotPropagates(t *testing.T) {
+	boom := errors.New("mmdc: run: exit status 1")
+	u := &fakeUploader{}
+	p := renderdiagrams.New(&fakeRenderer{err: boom}, u)
+	out, err := p.Apply(context.Background(), docWith(ir.DiagramBlock{Lang: "mermaid", Source: "graph oops"}))
+	if err != nil {
+		t.Fatalf("render failure must not fail the pipeline, got %v", err)
+	}
+	if len(u.calls) != 0 {
+		t.Errorf("a failed render must not upload anything")
+	}
+	db := firstBlock(t, out).(ir.DiagramBlock)
+	if db.AssetRef != "" || db.Source != "graph oops" {
+		t.Errorf("failed-render block must pass through with source intact, got %+v", db)
 	}
 }
 
