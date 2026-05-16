@@ -27,6 +27,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/vilosource/mykb-curator/internal/adapters/docspecs"
 	docspecslocalfs "github.com/vilosource/mykb-curator/internal/adapters/docspecs/localfs"
 	kbpkg "github.com/vilosource/mykb-curator/internal/adapters/kb"
 	kbgit "github.com/vilosource/mykb-curator/internal/adapters/kb/git"
@@ -67,6 +68,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/reporter"
 	"github.com/vilosource/mykb-curator/internal/reporter/sinks"
 	gitsrc "github.com/vilosource/mykb-curator/internal/sources/git"
+	"github.com/vilosource/mykb-curator/internal/specs/docspec"
 )
 
 var (
@@ -162,14 +164,37 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 		frontendRegistry.Register(editorial.New(llmClient, cfg.LLM.Model))
 	}
 
+	// SDD-for-docs path: a *.doc.yaml topic → a cross-linked cluster.
+	// Needs an LLM (the architecture frontend synthesises prose) and
+	// a local spec dir to discover *.doc.yaml in. Absent either, the
+	// docspec path is simply not wired (legacy specs unaffected).
+	// Constructed BEFORE the pass pipeline so ValidateLinks's
+	// known-pages set can include the cluster's own page titles +
+	// declared related targets (the doc-spec is the IA contract).
+	var docSpecStore *docspecslocalfs.Store
+	var clusterRenderer *cluster.Cluster
+	var outputJudge *judge.Judge
+	if llmClient != nil && cfg.SpecStore.Type == "local" && cfg.SpecStore.Repo != "" {
+		gitResolver := gitsrc.New(cfg.Sources.Git.Root, cfg.Sources.Git.Repos)
+		archFrontend := architecture.New(llmClient, cfg.LLM.Model, gitResolver)
+		clusterRenderer = cluster.New(archFrontend)
+		docSpecStore = docspecslocalfs.New(cfg.SpecStore.Repo)
+		outputJudge = judge.New(llmClient, cfg.LLM.Model)
+	}
+
 	// Pass pipeline is per-run because ResolveKBRefs closes over the
 	// kb snapshot. ValidateLinks's known-pages map is built from the
-	// loaded specs (every spec.Page is a known target).
+	// loaded specs (every spec.Page) plus every docspec cluster
+	// page + its declared related/child targets.
 	var diagramRepairer renderdiagrams.Repairer
 	if llmClient != nil {
 		diagramRepairer = renderdiagrams.NewLLMRepairer(llmClient, cfg.LLM.Model)
 	}
-	buildPasses := composePassPipeline(specStore, wikiTarget, renderdiagrams.NewMermaidRenderer(""), diagramRepairer, cfg.Style)
+	var docStoreForLinks docspecs.Store
+	if docSpecStore != nil {
+		docStoreForLinks = docSpecStore
+	}
+	buildPasses := composePassPipeline(specStore, docStoreForLinks, wikiTarget, renderdiagrams.NewMermaidRenderer(""), diagramRepairer, cfg.Style)
 
 	onRendered := composeOnRenderedSink(ctx, cfg, wikiTarget, outDir)
 
@@ -192,21 +217,6 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 	}
 
 	maintPipeline, onMaint := composeMaintenance(cfg, specStore, llmClient)
-
-	// SDD-for-docs path: a *.doc.yaml topic → a cross-linked cluster.
-	// Needs an LLM (the architecture frontend synthesises prose) and
-	// a local spec dir to discover *.doc.yaml in. Absent either, the
-	// docspec path is simply not wired (legacy specs unaffected).
-	var docSpecStore *docspecslocalfs.Store
-	var clusterRenderer *cluster.Cluster
-	var outputJudge *judge.Judge
-	if llmClient != nil && cfg.SpecStore.Type == "local" && cfg.SpecStore.Repo != "" {
-		gitResolver := gitsrc.New(cfg.Sources.Git.Root, cfg.Sources.Git.Repos)
-		archFrontend := architecture.New(llmClient, cfg.LLM.Model, gitResolver)
-		clusterRenderer = cluster.New(archFrontend)
-		docSpecStore = docspecslocalfs.New(cfg.SpecStore.Repo)
-		outputJudge = judge.New(llmClient, cfg.LLM.Model)
-	}
 
 	deps := orchestrator.Deps{
 		Wiki:          cfg.Wiki,
@@ -381,7 +391,7 @@ func makeWikiUpsertSink(ctx context.Context, target wikipkg.Target) func(string,
 // RenderDiagrams runs before ApplyZoneMarkers (DESIGN.md §5.4) so the
 // markers wrap the final asset-ref'd diagram block; ValidateLinks
 // runs last so it catches links in resolved content too.
-func composePassPipeline(specStore specs.Store, uploader renderdiagrams.Uploader, renderer renderdiagrams.Renderer, repairer renderdiagrams.Repairer, style config.StyleConfig) func(kbpkg.Snapshot) *passes.Pipeline {
+func composePassPipeline(specStore specs.Store, docStore docspecs.Store, uploader renderdiagrams.Uploader, renderer renderdiagrams.Renderer, repairer renderdiagrams.Repairer, style config.StyleConfig) func(kbpkg.Snapshot) *passes.Pipeline {
 	styleRules := buildStyleRules(style)
 	diagrams := renderdiagrams.New(renderer, uploader)
 	if repairer != nil {
@@ -393,7 +403,7 @@ func composePassPipeline(specStore specs.Store, uploader renderdiagrams.Uploader
 		// Build known-pages map from the loaded specs. Best-effort:
 		// any pull failure leaves the map empty, which ValidateLinks
 		// will treat as "all links broken" — safe-fail behaviour.
-		known := buildKnownPages(specStore)
+		known := buildKnownPages(specStore, docStore)
 		return passes.NewPipeline(
 			resolvekbrefs.New(snap),
 			applystylerules.New(styleRules...),
@@ -425,15 +435,35 @@ func buildStyleRules(style config.StyleConfig) []applystylerules.Rule {
 // buildKnownPages collects spec.Page values from the spec store into
 // a set. Best-effort — errors here don't fail composition; they
 // degrade ValidateLinks to conservative-mode (fails on every link).
-func buildKnownPages(store specs.Store) map[string]bool {
+func buildKnownPages(store specs.Store, docStore docspecs.Store) map[string]bool {
 	out := map[string]bool{}
-	list, err := store.Pull(context.Background())
-	if err != nil {
-		return out
+	if list, err := store.Pull(context.Background()); err == nil {
+		for _, s := range list {
+			if s.Page != "" {
+				out[s.Page] = true
+			}
+		}
 	}
-	for _, s := range list {
-		if s.Page != "" {
-			out[s.Page] = true
+	// Doc-spec is the IA contract: every cluster page (parent +
+	// children) and every spec-declared related target is a known
+	// link target — exactly the trust legacy spec.Page gets. This
+	// is what makes the generated Part-of / child-index / related
+	// cross-links validate instead of failing the page.
+	if docStore != nil {
+		if files, err := docStore.Pull(context.Background()); err == nil {
+			for _, f := range files {
+				pages := append([]docspec.DocPage{f.Spec.Parent}, f.Spec.Children...)
+				for _, p := range pages {
+					if p.Page != "" {
+						out[p.Page] = true
+					}
+					for _, r := range p.Related {
+						if r != "" {
+							out[r] = true
+						}
+					}
+				}
+			}
 		}
 	}
 	return out
