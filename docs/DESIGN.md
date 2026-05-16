@@ -1099,6 +1099,19 @@ The numbered milestones below were the original sequencing plan; status is updat
   (v1.0); a no-op provider is wired until this lands
 - Spec authoring via `mykb-curator spec init` LLM conversation
 - `PandocBackend` (IR → Pandoc JSON → docx / PDF / EPUB / RTF)
+- **Judge Agent — closed-loop quality feedback.** An agent that
+  judges a rendered page against its spec + kb (completeness,
+  factual grounding, beginner-readability, structure) and returns
+  structured feedback the curator acts on to improve the output.
+  Generalises the v1.x diagram self-repair loop
+  (`renderdiagrams` `Repairer`: mmdc is a deterministic judge → LLM
+  fix → re-render) from "does it parse" to "is it good". Closes the
+  honest caveat that LLM output quality is currently single-pass
+  with only a graceful-degrade floor. Likely shape: a post-render
+  `Judge` pass/stage producing a verdict + actionable notes; on a
+  failing verdict, re-invoke the editorial frontend with the notes,
+  bounded iterations, then publish best-effort with the verdict
+  recorded in the run report.
 
 ---
 
