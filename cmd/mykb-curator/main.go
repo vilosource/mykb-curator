@@ -46,7 +46,9 @@ import (
 	"github.com/vilosource/mykb-curator/internal/pipelines/maintenance/checks/linkrot"
 	"github.com/vilosource/mykb-curator/internal/pipelines/maintenance/checks/staleness"
 	"github.com/vilosource/mykb-curator/internal/pipelines/maintenance/prbackend"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends/markdown"
+	mwbackend "github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends/mediawiki"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/editorial"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/projection"
@@ -188,7 +190,7 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 		LLM:           orchLLM,
 		Frontends:     frontendRegistry,
 		BuildPasses:   buildPasses,
-		Backend:       markdown.New(),
+		Backend:       composeBackend(cfg),
 		OnRendered:    onRendered,
 		RunState:      cache,
 		IRCache:       irCache,
@@ -521,6 +523,20 @@ func newRunID() string {
 	b := make([]byte, 4)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// composeBackend selects the codegen backend by wiki target. A
+// MediaWiki target needs wikitext; everything else (memory,
+// markdown, offline --out preview) gets Markdown. Picking the wrong
+// one is the bug that rendered headings as list items and printed
+// YAML frontmatter as body text.
+func composeBackend(cfg *config.Config) backends.Backend {
+	switch cfg.WikiTarget.Type {
+	case "mediawiki":
+		return mwbackend.New()
+	default:
+		return markdown.New()
+	}
 }
 
 // composeLLMClient builds the LLM client per cfg.LLM.Provider:

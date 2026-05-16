@@ -405,8 +405,8 @@ Passes are independently unit-testable: fixture IR in, expected IR out. Same TDD
 
 | Backend | Status | Notes |
 |---|---|---|
-| `MediaWikiBackend` | v1 (primary target) | Built on `mwn` npm. Wikitext output. `bot=1` on every edit. |
-| `MarkdownBackend` | v1 (for offline preview + git-backed wikis) | Vanilla markdown + frontmatter. |
+| `MediaWikiBackend` | ✓ built (2026-05-16) | Pure Go IR→**wikitext** (`== H2 ==`, `{|wikitable|}`, `[[File:]]`, inert HTML-comment markers, no YAML frontmatter). NB: the old "built on `mwn` npm" note was design drift — backends are pure Go `(IR)→string`, no npm; wiki I/O is the adapter's job. Selected when `wiki_target.type=mediawiki`. |
+| `MarkdownBackend` | ✓ built | Vanilla markdown + frontmatter. Offline `--out` preview + git-backed/memory wikis. |
 | `StaticHTMLBackend` | v2 | For static-site hosting (e.g. Hugo, public docs). |
 | `ConfluenceBackend` | v2+ | Storage format (XHTML-ish). |
 | `PandocBackend` | future | IR → Pandoc JSON → docx/PDF/EPUB/LaTeX. |
