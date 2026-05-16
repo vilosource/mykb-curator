@@ -96,7 +96,10 @@ func TestScenario_AgenticRender_LiveAgentAgainstRealMediaWiki(t *testing.T) {
 	case os.Getenv("GEMINI_API_KEY") != "":
 		providerEnv["GEMINI_API_KEY"] = os.Getenv("GEMINI_API_KEY")
 		if model == "" {
-			model = "google/gemini-2.0-flash"
+			// Verified working against the live pi-harness
+			// 2026-05-16; an invalid id (e.g. gemini-2.0-flash) makes
+			// pi emit no text — the model string is load-bearing.
+			model = "google/gemini-2.5-flash"
 		}
 	case os.Getenv("OPENAI_API_KEY") != "":
 		providerEnv["OPENAI_API_KEY"] = os.Getenv("OPENAI_API_KEY")

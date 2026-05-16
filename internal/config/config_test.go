@@ -81,6 +81,27 @@ func TestLoad_MissingRequired(t *testing.T) {
 	}
 }
 
+func TestLoad_DisableBotAssert(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yaml")
+	body := "wiki: acme\n" +
+		"kb_source:\n  type: local\n" +
+		"spec_store:\n  type: local\n" +
+		"wiki_target:\n  type: mediawiki\n  url: http://localhost:8181/api.php\n" +
+		"  disable_bot_assert: true\n" +
+		"  auth:\n    user: Admin\n    password_env: MW_PASS\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.WikiTarget.DisableBotAssert {
+		t.Errorf("disable_bot_assert not parsed (got false)")
+	}
+}
+
 func TestValidate_HeadingCase(t *testing.T) {
 	base := func(hc string) *Config {
 		return &Config{

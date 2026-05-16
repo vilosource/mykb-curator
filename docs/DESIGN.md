@@ -1043,41 +1043,49 @@ The numbered milestones below were the original sequencing plan; status is updat
   golangci-lint-v2 + Go-1.25 toolchain, commit rules incl. no
   AI-attribution trailer, and the extension-point map).
 
+**v1.x — Live-agent experiment harness** ✓ (complete 2026-05-16 — built end-to-end and demoed live)
+
+> Roadmap-honesty note (historical, 2026-05-16): §15/§16 always
+> specified a `pi` LLM impl + `deployments/pi-harness` + the
+> `cmd/pi-wrapper` shim, but the v0.5 roadmap rewrite marked the
+> editorial LLM stack "Done" with only Anthropic/Cache/Replay/
+> Recording and never re-entered the Pi harness as a tracked item —
+> an unbuilt architectural component implied-done by omission. This
+> block restored the tracking and then delivered it.
+
+- ✓ `PiClient` (HTTP to the shim) + `pi` case in the composition
+  root; `config.LLM.Endpoint` is the harness URL.
+- ✓ `cmd/pi-wrapper` `invokePi` parses the frozen `pi --print
+  --mode json` JSONL event stream (docs/pi-harness-contract.md,
+  recorded fixture).
+- ✓ `deployments/{mediawiki,pi-harness}` are real first-boot images;
+  `bootstrap.sh` is the single source of truth (scenario fixture
+  builds it, no duplicated Go bootstrap).
+- ✓ Repo-root curator runtime `Dockerfile` ships `mmdc`.
+- ✓ Agentic L4 scenario (`test/scenario/agentic_render_test.go`),
+  opt-in/skip-with-reason (live model). ✓ `make harness-up` /
+  `harness-down`. ✓ `wiki_target.disable_bot_assert` config
+  (dev/test wikis need it; surfaced by the live run).
+- ✓ Demoed 2026-05-16: against `make harness-up`, a projection
+  spec AND an editorial spec authored by the **live Pi agent**
+  (gemini-2.5-flash via the pi-harness container) both landed on
+  the real MediaWiki. Finding: the pi `provider/id` model string is
+  load-bearing (an invalid id ⇒ pi emits no text); the agentic
+  scenario pins a verified default.
+
 ### Not yet
 
-**v1.x — Live-agent experiment harness**
+**Bug — first-create reports failed (found by the harness, 2026-05-16)**
 
-> Roadmap-honesty note (2026-05-16): the architecture (§15 layout,
-> §16 deps) has always specified a `pi` LLM impl + a `deployments/
-> pi-harness` Pi container + a `cmd/pi-wrapper` HTTP shim, so the
-> curator's editorial frontend can be driven by a *live Pi agent*
-> and an L4 scenario can run Pi + MediaWiki together as an
-> experiment loop. The v0.5 roadmap rewrite marked the editorial
-> LLM stack "Done" with only Anthropic/Cache/Replay/Recording and
-> never re-entered the Pi harness here as a tracked item — so an
-> unbuilt architectural component was implied-done by omission.
-> This entry restores that tracking. Verified-unbuilt:
-> `internal/llm/pi.go` absent; `cmd/pi-wrapper` `invokePi` is a
-> stub; `deployments/{mediawiki,pi-harness}/Dockerfile` bootstrap
-> is TBD; no repo-root curator runtime `Dockerfile`.
-
-- `PiClient` LLM impl (HTTP to the pi-harness shim) + `pi` case in
-  the composition root (`config.LLM.Endpoint` already reserved
-  "for pi: the pi-harness URL")
-- Finish `cmd/pi-wrapper` `invokePi` against the real `pi --print
-  --mode json` batch contract
-- Make `deployments/mediawiki` + `deployments/pi-harness`
-  first-boot-bootstrapping real images (lift the proven MediaWiki
-  bootstrap out of `mediawiki_fixture_test.go`; single source of
-  truth)
-- Repo-root curator runtime `Dockerfile` (ships with `mmdc`;
-  unblocks the real mermaid-render path deferred in v1.0 item 1)
-- Agentic L4 scenario: testcontainers spins up pi-harness +
-  MediaWiki, curator `llm.provider=pi`, a spec is authored onto the
-  real wiki by the live agent (nightly-gated; skip-with-reason
-  without a Pi model key)
-- `make harness-up` / `harness-down` for the hand-driven experiment
-  loop
+- Against a real MediaWiki, first-time page creation lands the page
+  correctly but the spec is reported `status=failed` with
+  "edit successful, but did not change page": the mediawiki adapter
+  surfaces go-mwclient `ErrEditNoChange` on the create path. Content
+  is correct; the run report lies. Exposed by the first end-to-end
+  curator-config run through the live experiment harness. kb gotcha
+  `eEeHXXRM`. Fix = treat create/no-change as success in the
+  adapter+reconciler, with a regression test on the real-MediaWiki
+  L4 path.
 
 **v2+ — Extensibility**
 

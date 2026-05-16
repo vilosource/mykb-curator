@@ -622,9 +622,10 @@ func composeWikiTarget(cfg *config.Config) (wikipkg.Target, error) {
 			return nil, fmt.Errorf("wiki_target.auth.password_env=%q: env var unset or empty", cfg.WikiTarget.Auth.PasswordEnv)
 		}
 		return mediawiki.New(mediawiki.Config{
-			APIURL:  cfg.WikiTarget.URL,
-			BotUser: cfg.WikiTarget.Auth.User,
-			BotPass: pass,
+			APIURL:           cfg.WikiTarget.URL,
+			BotUser:          cfg.WikiTarget.Auth.User,
+			BotPass:          pass,
+			DisableBotAssert: cfg.WikiTarget.DisableBotAssert,
 		})
 	case "memory":
 		bot := cfg.WikiTarget.Auth.User

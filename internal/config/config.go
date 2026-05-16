@@ -77,6 +77,13 @@ type WikiTargetConfig struct {
 	Type string         `yaml:"type"` // mediawiki | confluence | markdown | static
 	URL  string         `yaml:"url"`
 	Auth WikiAuthConfig `yaml:"auth"`
+
+	// DisableBotAssert skips MediaWiki's assert=bot guard. Production
+	// leaves this false (the assert catches "your bot lost its
+	// group" silently). Dev/test wikis — including the experiment
+	// harness, where Admin-as-bot's group membership is flaky on
+	// fresh SQLite — set it true. Mirrors mediawiki.Config.
+	DisableBotAssert bool `yaml:"disable_bot_assert"`
 }
 
 type WikiAuthConfig struct {
