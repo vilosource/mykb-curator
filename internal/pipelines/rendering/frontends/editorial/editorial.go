@@ -84,6 +84,11 @@ Style:
 - Use ## (and ### for sub-topics) for headings. Do not use # — the page title is set separately.
 - Lead a newcomer in: briefly explain what the technology is and the concepts needed to understand it, THEN the organisation's specifics.
 - Prefer clear prose paragraphs. Include diagrams where they aid understanding using fenced ` + "```mermaid" + ` blocks (flowchart/sequence/etc.) — diagrams are rendered to images automatically.
+- Mermaid rules (diagrams that break do not render — follow exactly):
+  * One statement per line. Put the diagram type (e.g. graph TD) on its own first line; never put node/edge statements on the same line as it or as a subgraph.
+  * Node/edge label text must contain NO parentheses, slashes, colons or backticks. Rephrase instead (write "Leader" not "(Leader)", "vault dot acme dot internal" or just "Vault endpoint" not a URL).
+  * Quote every subgraph title: subgraph "My Title". Keep titles short and plain.
+  * Keep diagrams small (a dozen nodes max); prefer several simple diagrams over one dense one.
 - Ground every organisation-specific claim (versions, topology, decisions) in the supplied kb content; do not invent organisation specifics. General, well-known background about the technology itself may be explained to orient the reader.`
 
 // composePrompt assembles the per-page user message from intent +
