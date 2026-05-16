@@ -43,10 +43,21 @@ Status legend: **OPEN** (not yet discussed) · **DISCUSSING** ·
 
 1. **Output-correctness assurance (LLM-as-Judge).** Editorial pages
    are LLM-generated, currently single-pass + graceful-degrade
-   floor; an authoritative wiki needs the Judge loop. — **OPEN**
+   floor; an authoritative wiki needs the Judge loop. —
+   **RESOLVED (2026-05-16):** v1 Judge is **report-only** — it reads
+   each rendered section + its declared `intent`, emits a verdict
+   into the run report, and never blocks a push. Matches the stated
+   purpose ("judge the output so the curator can improve"); a gate
+   is a separate, heavier trust escalation, promotable later by a
+   one-line policy change once verdicts are observed on real pages.
 2. **Grounding / hallucination boundary.** Enforce "no
    organisation-specific claim without a kb source"; provenance
-   markers exist but are not enforcement. — **OPEN**
+   markers exist but are not enforcement. —
+   **RESOLVED (2026-05-16):** lives in the Judge — it additionally
+   flags any organisation-specific claim not traceable to a resolved
+   source. Report-only in v1 (same rationale as #1). Provenance
+   markers stay the structural substrate; the Judge is the
+   enforcement reviewer over them.
 3. **Source-of-truth discipline (behavioural, not tooling).** The
    model only works if the team writes knowledge to mykb, not the
    wiki; otherwise the curator amplifies a stale brain. —
@@ -128,6 +139,13 @@ Status legend: **OPEN** (not yet discussed) · **DISCUSSING** ·
     boundary. — **RESOLVED (descoped) 2026-05-16**: not targeting
     optiscangroup.com; target is the local harness wiki
     (`localhost:8181`), no Entra/App-Proxy in path. Folded into #8.
+12. **Reality-probe execution policy.** `cmd:/ssh:/az:` source
+    resolvers execute commands declared in a doc-spec — a real
+    capability escalation (a future LLM or CI run could trigger
+    them). Needs a per-scheme allowlist, enforced read-only, and
+    per-invocation HITL consistent with the standing terraform/
+    ansible posture. `git:` (read-only, local) is exempt and ships
+    in slice 4. — **OPEN** (slice 4b; opened 2026-05-16).
 
 ## 4. Discussion log
 
@@ -243,6 +261,38 @@ reality-probe needs real-infra read credentials regardless of
 where the wiki lives — that stays open under #5. The
 `wiki-api.optiscangroup.com` API endpoint + bot creds exist in the
 environment but are deliberately left untouched per this descope.
+
+### 2026-05-16 — SDD-docs slices 2+3 landed; #1/#2 resolved; slice 4 scoped
+
+The doc-spec pipeline is now real: `architecture` frontend
+(audience-aware, intent+kb-source narrative — the human-curated
+page, not the dump) and the `cluster` orchestrator (one DocSpec →
+parent + N children, generated `Part of`/child-index/`related`/
+`categories` cross-links). The 1:1 dump survives only as a
+`kind: reference` child, exactly the machine-vs-human split the
+user asked for.
+
+Issues **#1 (Judge)** and **#2 (grounding)** resolved together:
+the Judge is **report-only** in v1 — reviews each section against
+its declared `intent` *and* flags organisation-specific claims not
+traceable to a resolved source; surfaces in the run report, never
+blocks a push. Gate-mode is a deferred, observable-first policy
+flip, not v1.
+
+Slice 4 deliberately **scoped down**: ship the real `git:`
+resolver (read-only `git -C` over already-present clones — safe,
+deterministic, and what the real Vault page actually needs) +
+the report-only Judge. `cmd:/ssh:/az:` are **not** built here —
+arbitrary execution declared in a doc-spec needs its own
+execution-policy design (per-scheme allowlist, enforced read-only,
+per-invocation HITL consistent with the standing terraform/ansible
+posture). Tracked as **new issue #12 (reality-probe execution
+policy) — OPEN** and slice 4b. Until then those schemes keep the
+honest slice-3 "pending — populated by the reality-probe resolver"
+placeholder; pages stay complete and non-fabricated.
+
+Resolved tally: #1, #2, #3, #5, #6, #7, #8, #11 (8 of 12, with #12
+newly opened). Still OPEN: #4, #9, #10, #12.
 
 ---
 

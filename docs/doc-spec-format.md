@@ -107,8 +107,15 @@ not the page.
    "pending" row for non-kb until 4) + `render: child-index`
    (frontend emits a position-correct placeholder; the cluster fills
    it with the children). **(done)**
-4. *(later, depends on 1–3)* `git:/cmd:/ssh:` source resolvers
-   (reality-probe family) + Judge validating section-vs-`intent`.
+4. *(depends on 1–3)* real **`git:` resolver** (read-only `git -C`
+   over local clones — deterministic, no network/host mutation) +
+   **report-only Judge** validating each section vs its declared
+   `intent` and flagging ungrounded org-specific claims. Surfaces
+   in the run report; never blocks a push.
+4b. *(security-gated, separate design)* `cmd:/ssh:/az:` resolvers
+   behind an execution-policy model (per-scheme allowlist, enforced
+   read-only, per-invocation HITL). Until shipped these schemes keep
+   the honest "pending" placeholder; no fabrication.
 5. *(integration, best after 4)* wire `.doc.yaml` discovery + the
    cluster into the orchestrator/CLI so a topic publishes end-to-end
    to the personal wiki. Deferred because the real Vault cluster's
