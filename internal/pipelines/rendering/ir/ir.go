@@ -139,6 +139,20 @@ func (IndexBlock) Kind() string             { return "index" }
 func (IndexBlock) Zone() Zone               { return ZoneMachine }
 func (b IndexBlock) Provenance() Provenance { return b.Prov }
 
+// CategoryBlock carries page taxonomy (MediaWiki categories /
+// markdown tag line). Machine-owned: categories come from the
+// doc-spec, never hand-edited on the page. Conventionally rendered
+// at the end of the page; the cluster appends it as a trailing
+// no-heading section.
+type CategoryBlock struct {
+	Names []string
+	Prov  Provenance
+}
+
+func (CategoryBlock) Kind() string             { return "category" }
+func (CategoryBlock) Zone() Zone               { return ZoneMachine }
+func (b CategoryBlock) Provenance() Provenance { return b.Prov }
+
 // DiagramBlock holds diagram source for rendering by the
 // RenderDiagrams pass. Lang selects the renderer (mermaid is the
 // default; plantuml, drawio handled by escape-hatch paths).

@@ -95,20 +95,30 @@ not the page.
 
 ## Implementation slices
 
-0. **This doc** — agreed format recorded (done).
+0. **This doc** — agreed format recorded. **(done)**
 1. **DocSpec model + parser + validation** — freeze the language;
-   no rendering yet. The contract everything else consumes.
+   no rendering yet. The contract everything else consumes. **(done)**
 2. **`architecture` frontend** consuming per-section intent+sources
    (kb only today), audience-aware narrative; **projection demoted**
-   to the `reference`-child generator.
+   to the `reference`-child generator. **(done)**
 3. **topic→cluster orchestration** — one DocSpec → parent + N
-   children; generated cross-links; `render: table|child-index`.
+   children; generated cross-links (`Part of`, parent child-index,
+   `related`, `categories`); `render: table` (kb rows now, declared
+   "pending" row for non-kb until 4) + `render: child-index`
+   (frontend emits a position-correct placeholder; the cluster fills
+   it with the children). **(done)**
 4. *(later, depends on 1–3)* `git:/cmd:/ssh:` source resolvers
    (reality-probe family) + Judge validating section-vs-`intent`.
+5. *(integration, best after 4)* wire `.doc.yaml` discovery + the
+   cluster into the orchestrator/CLI so a topic publishes end-to-end
+   to the personal wiki. Deferred because the real Vault cluster's
+   `Source Code & IaC` section needs the slice-4 `git:` resolver to
+   be complete, not partial.
 
 Deltas from today: `editorial` is the thin seed (no per-section
 intent/sources, single brief) — superseded by the `architecture`
 frontend. `projection` keeps existing as the reference generator.
-IR block kinds (Prose/Index/Table/Marker) already suffice — the
-LLVM shape pays off; this is a richer frontend + spec language, not
-an IR rethink.
+The LLVM shape held: the only IR addition needed was `CategoryBlock`
+(taxonomy → MediaWiki `[[Category:…]]`); Prose/Index/Table/Marker
+covered the rest. This is a richer frontend + spec language + a
+cluster orchestrator, not an IR rethink.

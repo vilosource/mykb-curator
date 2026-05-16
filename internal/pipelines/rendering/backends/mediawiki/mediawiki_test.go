@@ -219,6 +219,22 @@ func TestRender_IndexBlock_IsWikitextLinkList(t *testing.T) {
 	}
 }
 
+func TestRender_CategoryBlock_IsWikitextCategoryLinks(t *testing.T) {
+	doc := ir.Document{Sections: []ir.Section{{
+		Blocks: []ir.Block{ir.CategoryBlock{Names: []string{"Azure Infrastructure", "", " Vault "}}},
+	}}}
+	s := string(mustRender(t, doc))
+	if !strings.Contains(s, "[[Category:Azure Infrastructure]]\n") {
+		t.Errorf("category link missing:\n%s", s)
+	}
+	if !strings.Contains(s, "[[Category:Vault]]\n") {
+		t.Errorf("category name not trimmed/emitted:\n%s", s)
+	}
+	if strings.Contains(s, "[[Category:]]") {
+		t.Errorf("blank category name must be skipped:\n%s", s)
+	}
+}
+
 func TestRender_Table_IsWikitextTable(t *testing.T) {
 	doc := ir.Document{Sections: []ir.Section{{
 		Heading: "Inventory",

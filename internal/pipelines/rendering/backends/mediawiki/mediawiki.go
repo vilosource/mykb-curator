@@ -107,6 +107,8 @@ func writeBlock(buf *bytes.Buffer, blk ir.Block) {
 		writeTable(buf, b)
 	case ir.IndexBlock:
 		writeIndex(buf, b)
+	case ir.CategoryBlock:
+		writeCategories(buf, b)
 	case ir.DiagramBlock:
 		writeDiagram(buf, b)
 	case ir.Callout:
@@ -298,6 +300,17 @@ func padRow(row []string, n int) []string {
 		copy(out, row)
 		return out
 	}
+}
+
+// writeCategories emits MediaWiki category links. Order is preserved
+// (spec-declared); blank names are skipped.
+func writeCategories(buf *bytes.Buffer, b ir.CategoryBlock) {
+	for _, n := range b.Names {
+		if n = strings.TrimSpace(n); n != "" {
+			fmt.Fprintf(buf, "[[Category:%s]]\n", n)
+		}
+	}
+	buf.WriteByte('\n')
 }
 
 func writeDiagram(buf *bytes.Buffer, b ir.DiagramBlock) {

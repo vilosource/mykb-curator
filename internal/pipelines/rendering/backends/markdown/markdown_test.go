@@ -140,6 +140,26 @@ func TestRender_MarkerBlock_RendersAsHTMLComment(t *testing.T) {
 	}
 }
 
+func TestRender_CategoryBlock_RendersTagLine(t *testing.T) {
+	doc := ir.Document{Sections: []ir.Section{{
+		Blocks: []ir.Block{ir.CategoryBlock{Names: []string{"Azure Infrastructure", "", " Vault "}}},
+	}}}
+	out, err := New().Render(doc)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if s := string(out); !strings.Contains(s, "_Categories: Azure Infrastructure, Vault_") {
+		t.Errorf("category tag line wrong (blank skipped, names trimmed):\n%s", s)
+	}
+
+	empty, _ := New().Render(ir.Document{Sections: []ir.Section{{
+		Blocks: []ir.Block{ir.CategoryBlock{Names: []string{"", "  "}}},
+	}}})
+	if strings.Contains(string(empty), "_Categories:") {
+		t.Errorf("all-blank categories must emit nothing:\n%s", empty)
+	}
+}
+
 func TestRender_IndexBlock_RendersLinkList(t *testing.T) {
 	doc := ir.Document{Sections: []ir.Section{{
 		Heading: "Core Infrastructure",

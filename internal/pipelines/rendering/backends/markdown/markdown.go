@@ -103,6 +103,8 @@ func writeBlock(buf *bytes.Buffer, blk ir.Block) {
 		writeTable(buf, b)
 	case ir.IndexBlock:
 		writeIndex(buf, b)
+	case ir.CategoryBlock:
+		writeCategories(buf, b)
 	case ir.DiagramBlock:
 		writeDiagram(buf, b)
 	case ir.Callout:
@@ -205,6 +207,23 @@ func padRow(row []string, n int) []string {
 	out := make([]string, n)
 	copy(out, row)
 	return out
+}
+
+// writeCategories renders taxonomy as a single italic tag line —
+// markdown has no native category concept, so this is informational
+// (the wiki backend emits real [[Category:…]] links). Blank names
+// are skipped; nothing is emitted if none remain.
+func writeCategories(buf *bytes.Buffer, b ir.CategoryBlock) {
+	var names []string
+	for _, n := range b.Names {
+		if n = strings.TrimSpace(n); n != "" {
+			names = append(names, n)
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	fmt.Fprintf(buf, "_Categories: %s_\n", strings.Join(names, ", "))
 }
 
 func writeDiagram(buf *bytes.Buffer, b ir.DiagramBlock) {

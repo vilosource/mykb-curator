@@ -107,10 +107,10 @@ func TestRender_GroundsPromptAndFoldsUnderSectionTitles(t *testing.T) {
 		t.Fatalf("Render: %v", err)
 	}
 
-	// render:table and render:child-index sections are skipped in
-	// slice 2 — only the two prose sections produce LLM calls.
+	// render:table / render:child-index are deterministic — no LLM
+	// call. Only the two prose sections hit the LLM.
 	if len(llmC.seen) != 2 {
-		t.Fatalf("expected 2 LLM calls (table/child-index skipped), got %d", len(llmC.seen))
+		t.Fatalf("expected 2 LLM calls (table/child-index are LLM-free), got %d", len(llmC.seen))
 	}
 
 	// prompt 1 grounded in tag-filtered kb + carries section intent +
@@ -130,12 +130,31 @@ func TestRender_GroundsPromptAndFoldsUnderSectionTitles(t *testing.T) {
 	if doc.Frontmatter.Title != page.Page || doc.Frontmatter.KBCommit != "deadbeef" {
 		t.Errorf("frontmatter wrong: %+v", doc.Frontmatter)
 	}
-	if len(doc.Sections) != 2 {
-		t.Fatalf("want 2 rendered sections, got %d: %+v", len(doc.Sections), doc.Sections)
+	// All 4 declared sections appear, in declared order.
+	if len(doc.Sections) != 4 {
+		t.Fatalf("want 4 rendered sections, got %d: %+v", len(doc.Sections), doc.Sections)
 	}
-	if doc.Sections[0].Heading != "System Architecture" || doc.Sections[1].Heading != "Operations" {
-		t.Errorf("sections not folded under declared titles: %q %q",
-			doc.Sections[0].Heading, doc.Sections[1].Heading)
+	gotHeads := []string{
+		doc.Sections[0].Heading, doc.Sections[1].Heading,
+		doc.Sections[2].Heading, doc.Sections[3].Heading,
+	}
+	wantHeads := []string{"System Architecture", "Source Code", "Runbooks", "Operations"}
+	for i := range wantHeads {
+		if gotHeads[i] != wantHeads[i] {
+			t.Errorf("section %d heading = %q, want %q", i, gotHeads[i], wantHeads[i])
+		}
+	}
+	// render:table → TableBlock with the non-kb (git) source declared
+	// as a pending row, never fabricated.
+	tbl, ok := doc.Sections[1].Blocks[0].(ir.TableBlock)
+	if !ok || len(tbl.Rows) != 1 || tbl.Rows[0][0] != "git" ||
+		!strings.Contains(tbl.Rows[0][2], "pending") {
+		t.Errorf("render:table section wrong: %+v", doc.Sections[1].Blocks)
+	}
+	// render:child-index → empty placeholder for the cluster to fill.
+	idx, ok := doc.Sections[2].Blocks[0].(ir.IndexBlock)
+	if !ok || len(idx.Entries) != 0 || idx.Prov.SpecSection != "architecture-child-index" {
+		t.Errorf("render:child-index must be an empty cluster placeholder: %+v", doc.Sections[2].Blocks)
 	}
 	// LLM body became the declared section's blocks; mermaid → DiagramBlock.
 	var hasProse, hasDiagram bool

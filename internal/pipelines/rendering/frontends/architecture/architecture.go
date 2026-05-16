@@ -8,12 +8,12 @@
 // the page audience. The hard-won markdown→IR handling is shared via
 // the mdir package.
 //
-// Slice 2 scope: prose sections with kb: sources. render:table and
-// render:child-index sections, and non-kb source schemes
-// (git/cmd/ssh/file), are recognised but not resolved here —
-// cluster orchestration (slice 3) and the tool-using resolvers
-// (slice 4) own those. They are skipped without error, never
-// fabricated.
+// Scope: prose sections are LLM-synthesised from kb: sources;
+// render:table is rendered deterministically from sources (kb rows
+// now, a declared "pending" row for git/cmd/ssh/file until slice 4);
+// render:child-index emits an empty, position-correct placeholder
+// the cluster orchestrator fills with the topic's children. Non-kb
+// source contents are declared, never fabricated.
 package architecture
 
 import (
@@ -58,10 +58,26 @@ func (f *Frontend) Render(ctx context.Context, page docspec.DocPage, snap kb.Sna
 
 	for i := range page.Sections {
 		sec := page.Sections[i]
+		secHash := hashStr(page.Page + "\x00" + sec.Title + "\x00" + sec.Intent + "\x00" + rawSources(sec.Sources))
 		switch sec.Render {
-		case "child-index", "table":
-			// Owned by cluster orchestration (slice 3) / structured
-			// resolvers (slice 4). Skip here — never fabricate.
+		case "child-index":
+			// The list of children is cluster knowledge, not page
+			// knowledge — emit an empty, position-correct placeholder
+			// the cluster fills. Owning section ORDER here (one
+			// place) while the cluster injects sibling/child data
+			// keeps the two concerns cleanly separated.
+			doc.Sections = append(doc.Sections, ir.Section{
+				Heading: sec.Title,
+				Blocks: []ir.Block{ir.IndexBlock{
+					Prov: ir.Provenance{SpecSection: ChildIndexProv, InputHash: secHash},
+				}},
+			})
+			continue
+		case "table":
+			doc.Sections = append(doc.Sections, ir.Section{
+				Heading: sec.Title,
+				Blocks:  []ir.Block{tableFromSources(sec, snap, secHash)},
+			})
 			continue
 		}
 
@@ -77,11 +93,49 @@ func (f *Frontend) Render(ctx context.Context, page docspec.DocPage, snap kb.Sna
 			return ir.Document{}, fmt.Errorf("architecture: section %q: llm: %w", sec.Title, err)
 		}
 
-		hash := hashStr(page.Page + "\x00" + sec.Title + "\x00" + sec.Intent + "\x00" + rawSources(sec.Sources))
-		body := mdir.Parse(strings.TrimSpace(resp.Text), "architecture", hash)
-		doc.Sections = append(doc.Sections, foldSection(sec.Title, body, hash)...)
+		body := mdir.Parse(strings.TrimSpace(resp.Text), "architecture", secHash)
+		doc.Sections = append(doc.Sections, foldSection(sec.Title, body, secHash)...)
 	}
 	return doc, nil
+}
+
+// ChildIndexProv marks an empty IndexBlock the cluster orchestrator
+// must fill with the topic's children. The frontend owns section
+// position; the cluster owns the child list.
+const ChildIndexProv = "architecture-child-index"
+
+// tableFromSources renders a render:table section deterministically
+// (no LLM): kb sources expand to one row per entry; sources whose
+// scheme is not yet machine-resolvable (git/cmd/ssh/file) produce a
+// single honest "pending" row — declared, never fabricated.
+func tableFromSources(sec docspec.DocSection, snap kb.Snapshot, hash string) ir.TableBlock {
+	tb := ir.TableBlock{
+		Columns: []string{"Type", "Ref", "Summary"},
+		Prov:    ir.Provenance{SpecSection: "architecture-table", InputHash: hash},
+	}
+	for _, s := range sec.Sources {
+		if s.Scheme != "kb" {
+			tb.Rows = append(tb.Rows, []string{
+				s.Scheme, s.Spec, "pending — populated by the reality-probe resolver (slice 4)",
+			})
+			continue
+		}
+		a, entries, ok := ResolveKB(snap, s)
+		if !ok {
+			continue
+		}
+		for _, e := range entries {
+			tb.Rows = append(tb.Rows, []string{e.Type, a.ID + "/" + e.ID, firstLine(e.Text)})
+		}
+	}
+	return tb
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return strings.TrimSpace(s)
 }
 
 // foldSection turns the LLM's parsed output into IR sections under
