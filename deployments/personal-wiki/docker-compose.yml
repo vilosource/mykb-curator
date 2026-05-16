@@ -35,5 +35,26 @@ services:
     volumes:
       - mykb-personal-wiki-data:/var/www/data
 
+  # Durable pi shim for the daily wiki — kb-pi parity. NOT the
+  # disposable harness pi-harness (deployments/docker-compose.yml
+  # :8182, env-API-key, destroyed by `harness-down -v`). The image
+  # stays credential-free: it bind-mounts the operator's
+  # ~/.pi/agent (settings.json → github-copilot / claude-opus-4-7,
+  # plus the Copilot OAuth in auth.json that pi auto-refreshes), so
+  # the containerised pi behaves exactly like `kb-pi`. The mount is
+  # read-write on purpose: pi must persist the rotated Copilot
+  # access token, sharing the one credential set with kb-pi.
+  personal-pi:
+    build:
+      context: ../..
+      dockerfile: deployments/pi-harness/Dockerfile
+    image: mykb-curator/personal-pi:dev
+    container_name: mykb-personal-pi
+    restart: unless-stopped
+    ports:
+      - "8882:8080"
+    volumes:
+      - ${HOME}/.pi/agent:/root/.pi/agent
+
 volumes:
   mykb-personal-wiki-data:

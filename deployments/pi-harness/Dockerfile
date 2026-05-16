@@ -26,16 +26,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g @mariozechner/pi-coding-agent@0.66.1
 
+# Build-time verify the pi install (vafi images/pi lesson: fail the
+# build early, never ship an image whose pi is broken).
+RUN pi --version
+
 COPY --from=build /out/pi-wrapper /usr/local/bin/pi-wrapper
 
 EXPOSE 8080
 ENV PI_BINARY=pi
 
-# Pi auth (provider key) is supplied at run time via env, e.g.
-#   -e ANTHROPIC_API_KEY=...  or  -e GEMINI_API_KEY=...
+# This image is deliberately credential-free. Auth + provider come
+# from a bind-mounted ~/.pi/agent (settings.json selects the
+# provider/model — kb-pi uses github-copilot / claude-opus-4-7 with
+# a Copilot OAuth token in auth.json that pi auto-refreshes; the
+# mount must be read-write so the rotated token persists). See
+# deployments/personal-wiki/docker-compose.yml (personal-pi). An
+# env API key (-e ANTHROPIC_API_KEY=…) still works for the
+# disposable harness but is NOT the kb-pi-parity path.
+#
 # The wrapper invokes pi --no-tools --no-session --no-extensions
-# --no-skills (see docs/pi-harness-contract.md), so no kb extension
-# or skills are loaded — this is a plain LLM, not the kb-pi agent.
+# --no-skills (see docs/pi-harness-contract.md): no kb extension or
+# skills load — a plain LLM completion, not the kb-pi agent, but
+# pointed at the same provider + credentials.
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
   CMD curl -fsS http://127.0.0.1:8080/healthz || exit 1
