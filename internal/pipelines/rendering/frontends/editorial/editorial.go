@@ -77,13 +77,14 @@ func (f *Frontend) Build(ctx context.Context, spec specs.Spec, snap kb.Snapshot)
 // systemPrompt is the persona instruction sent on every editorial
 // frontend call. Kept terse — the per-page intent lives in the user
 // message.
-const systemPrompt = `You are a wiki editor for an engineering organisation. Your job is to write clear, factual wiki pages that capture institutional knowledge for a technical reader.
+const systemPrompt = `You are a wiki editor for an engineering organisation. You write clear wiki pages that capture institutional knowledge and are understandable by a reader with ZERO prior knowledge of the subject.
 
 Style:
-- Markdown output only. No preamble, no postscript, no code fences around the entire response.
-- Use ## for section headings. Do not use # — the page title is set separately.
-- Plain prose paragraphs. No bullet lists, no tables, no code blocks in v0.5.
-- Write what the kb supports. Do not invent facts.`
+- Markdown output only. No preamble, no postscript. Do not wrap the whole response in a code fence.
+- Use ## (and ### for sub-topics) for headings. Do not use # — the page title is set separately.
+- Lead a newcomer in: briefly explain what the technology is and the concepts needed to understand it, THEN the organisation's specifics.
+- Prefer clear prose paragraphs. Include diagrams where they aid understanding using fenced ` + "```mermaid" + ` blocks (flowchart/sequence/etc.) — diagrams are rendered to images automatically.
+- Ground every organisation-specific claim (versions, topology, decisions) in the supplied kb content; do not invent organisation specifics. General, well-known background about the technology itself may be explained to orient the reader.`
 
 // composePrompt assembles the per-page user message from intent +
 // kb digest.
@@ -155,7 +156,45 @@ func parseMarkdown(md, specHash string) []ir.Section {
 		current = ir.Section{Heading: heading}
 	}
 
+	inFence := false
+	fenceLang := ""
+	var fenceBuf strings.Builder
+	addDiagram := func() {
+		current.Blocks = append(current.Blocks, ir.DiagramBlock{
+			Lang:   fenceLang,
+			Source: strings.TrimRight(fenceBuf.String(), "\n"),
+			Prov:   ir.Provenance{SpecSection: "editorial-diagram", InputHash: specHash},
+		})
+		fenceBuf.Reset()
+		fenceLang = ""
+	}
+
 	for _, line := range lines {
+		// Fenced code blocks → DiagramBlock. ```mermaid is rendered
+		// to an image + uploaded by the RenderDiagrams pass; any
+		// other language falls through that pass (ErrUnsupportedLang)
+		// and the backend renders it as <syntaxhighlight>. Either
+		// way the fence never leaks into prose as literal text.
+		if strings.HasPrefix(line, "```") {
+			if inFence {
+				addDiagram()
+				inFence = false
+			} else {
+				flush() // emit prose accumulated before the fence
+				fenceLang = strings.TrimSpace(strings.TrimPrefix(line, "```"))
+				if fenceLang == "" {
+					fenceLang = "text" // not mermaid → syntaxhighlight path
+				}
+				inFence = true
+			}
+			continue
+		}
+		if inFence {
+			fenceBuf.WriteString(line)
+			fenceBuf.WriteByte('\n')
+			continue
+		}
+
 		// Any ATX heading (## … ######) starts a section. LLMs don't
 		// reliably restrict themselves to ## despite the system
 		// prompt; treating only ## as a boundary leaked "### Foo"
@@ -169,6 +208,9 @@ func parseMarkdown(md, specHash string) []ir.Section {
 		}
 		buf.WriteString(line)
 		buf.WriteByte('\n')
+	}
+	if inFence { // unclosed fence — don't lose the content
+		addDiagram()
 	}
 	flush()
 	if current.Heading != "" || len(current.Blocks) > 0 {

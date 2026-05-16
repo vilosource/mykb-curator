@@ -1,0 +1,3 @@
+{"id":"vault-l1","area":"vault","type":"link","text":"HashiCorp Vault — official documentation","url":"https://developer.hashicorp.com/vault/docs","tags":["docs"],"zone":"active","provenance":{"status":"verified","source":"hashicorp"}}
+{"id":"vault-l2","area":"vault","type":"link","text":"Integrated Storage (Raft) concepts","url":"https://developer.hashicorp.com/vault/docs/concepts/integrated-storage","tags":["docs","raft"],"zone":"active","provenance":{"status":"verified","source":"hashicorp"}}
+{"id":"vault-l3","area":"vault","type":"link","text":"Internal: vault-dr runbook (snapshot + restore)","url":"https://wiki.acme.internal/Runbook/Vault_DR","tags":["runbook","dr"],"zone":"active","provenance":{"status":"unverified","source":"internal wiki"}}

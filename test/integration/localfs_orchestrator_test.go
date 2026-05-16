@@ -43,8 +43,8 @@ func TestLocalFS_Orchestrator_HappyPath_AndGuardrail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if len(rep.Specs) != 3 {
-		t.Fatalf("len(Specs) = %d, want 3 (2 valid + 1 deliberately invalid); got: %+v", len(rep.Specs), rep.Specs)
+	if len(rep.Specs) != 4 {
+		t.Fatalf("len(Specs) = %d, want 4 (3 valid + 1 deliberately invalid); got: %+v", len(rep.Specs), rep.Specs)
 	}
 
 	var accepted, rejected int
@@ -61,8 +61,8 @@ func TestLocalFS_Orchestrator_HappyPath_AndGuardrail(t *testing.T) {
 			t.Errorf("spec %s: unexpected status %q (v0.0.1 stub allows only Skipped or Failed)", s.ID, s.Status)
 		}
 	}
-	if accepted != 2 {
-		t.Errorf("accepted = %d, want 2 (area-vault + azure-infrastructure)", accepted)
+	if accepted != 3 {
+		t.Errorf("accepted = %d, want 3 (area-vault + azure-infrastructure + projection-vault-smoke)", accepted)
 	}
 	if rejected != 1 {
 		t.Errorf("rejected = %d, want 1 (_invalid-wrong-wiki frontmatter guardrail)", rejected)

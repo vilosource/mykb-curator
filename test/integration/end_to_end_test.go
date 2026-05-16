@@ -66,9 +66,9 @@ func TestEndToEnd_ProjectionPipeline_AgainstFixtures(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Two acme specs are projection (area-vault + azure-infrastructure
-	// but only the projection one is registered; the editorial one
-	// fails for "no frontend registered for kind=editorial"). One
+	// projection-vault-smoke is the projection spec; area-vault +
+	// azure-infrastructure are editorial (no editorial frontend
+	// registered here, so they fail "no frontend"). One
 	// spec is deliberately mis-routed.
 	var rendered_count, failed int
 	for _, s := range rep.Specs {
@@ -80,23 +80,23 @@ func TestEndToEnd_ProjectionPipeline_AgainstFixtures(t *testing.T) {
 		}
 	}
 	if rendered_count < 1 {
-		t.Errorf("rendered = %d, want ≥ 1 (area-vault.spec.md is a projection)", rendered_count)
+		t.Errorf("rendered = %d, want ≥ 1 (projection-vault-smoke.spec.md is a projection)", rendered_count)
 	}
 	if failed < 1 {
 		t.Errorf("failed = %d, want ≥ 1 (_invalid-wrong-wiki must fail guardrail)", failed)
 	}
 
-	// Golden file check: area-vault is the deterministic projection.
-	vaultOut, ok := rendered["area-vault.spec.md"]
+	// Golden file check: projection-vault-smoke is the deterministic projection fixture (area-vault is now editorial).
+	vaultOut, ok := rendered["projection-vault-smoke.spec.md"]
 	if !ok {
-		t.Fatalf("no rendered output for area-vault.spec.md; got keys: %v", keys(rendered))
+		t.Fatalf("no rendered output for projection-vault-smoke.spec.md; got keys: %v", keys(rendered))
 	}
 	// Strip the GeneratedAt timestamp + footer LastCurated since
 	// the frontend doesn't set them in v0.1 (and we want the
 	// golden to be stable across runs even before that wires up).
 	got := normalizeForGolden(vaultOut)
 
-	goldenPath := filepath.Join("testdata", "area-vault.golden.md")
+	goldenPath := filepath.Join("testdata", "vault-projection.golden.md")
 	if *updateGolden {
 		_ = os.MkdirAll(filepath.Dir(goldenPath), 0o755)
 		if err := os.WriteFile(goldenPath, got, 0o600); err != nil {

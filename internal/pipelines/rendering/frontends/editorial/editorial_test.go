@@ -150,6 +150,73 @@ func TestBuild_DeeperHeadingsBecomeSections(t *testing.T) {
 	}
 }
 
+// A zero-knowledge wiki page needs diagrams. The agent emits fenced
+// ```mermaid blocks; parseMarkdown must turn them into DiagramBlocks
+// so the RenderDiagrams pass renders+uploads them (otherwise the
+// fence is dumped as prose and never becomes an image).
+func TestBuild_FencedMermaidBecomesDiagramBlock(t *testing.T) {
+	resp := "## Topology\n\nThe cluster:\n\n```mermaid\ngraph TD; A-->B;\n```\n\nAfter the diagram.\n"
+	doc, err := New(&stubLLM{resp: resp}, "m").Build(context.Background(),
+		specs.Spec{Wiki: "acme", Page: "P", Kind: "editorial", Hash: "h9"}, kb.Snapshot{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	var diagram *ir.DiagramBlock
+	var proseSeen []string
+	for _, s := range doc.Sections {
+		for _, b := range s.Blocks {
+			switch v := b.(type) {
+			case ir.DiagramBlock:
+				d := v
+				diagram = &d
+			case ir.ProseBlock:
+				proseSeen = append(proseSeen, v.Text)
+				if strings.Contains(v.Text, "```") || strings.Contains(v.Text, "graph TD") {
+					t.Errorf("fence/source leaked into prose: %q", v.Text)
+				}
+			}
+		}
+	}
+	if diagram == nil {
+		t.Fatalf("no DiagramBlock produced from ```mermaid fence; sections=%+v", doc.Sections)
+	}
+	if diagram.Lang != "mermaid" || strings.TrimSpace(diagram.Source) != "graph TD; A-->B;" {
+		t.Errorf("DiagramBlock = %+v, want lang=mermaid source='graph TD; A-->B;'", *diagram)
+	}
+	if diagram.Prov.InputHash != "h9" {
+		t.Errorf("DiagramBlock provenance not stamped: %+v", diagram.Prov)
+	}
+	// Surrounding prose preserved as separate blocks.
+	joined := strings.Join(proseSeen, "|")
+	if !strings.Contains(joined, "The cluster:") || !strings.Contains(joined, "After the diagram.") {
+		t.Errorf("prose around the fence lost: %q", joined)
+	}
+}
+
+func TestBuild_NonMermaidFenceIsDiagramBlockForSyntaxHighlight(t *testing.T) {
+	resp := "## Config\n\n```hcl\npath \"secret/*\" { capabilities = [\"read\"] }\n```\n"
+	doc, err := New(&stubLLM{resp: resp}, "m").Build(context.Background(),
+		specs.Spec{Wiki: "acme", Page: "P", Kind: "editorial", Hash: "h"}, kb.Snapshot{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	var d *ir.DiagramBlock
+	for _, s := range doc.Sections {
+		for _, b := range s.Blocks {
+			if v, ok := b.(ir.DiagramBlock); ok {
+				vv := v
+				d = &vv
+			}
+		}
+	}
+	if d == nil || d.Lang != "hcl" {
+		t.Fatalf("non-mermaid fence should be a DiagramBlock{Lang:hcl} (renders as <syntaxhighlight>), got %+v", d)
+	}
+	if !strings.Contains(d.Source, "capabilities") {
+		t.Errorf("code fence body lost: %q", d.Source)
+	}
+}
+
 func TestBuild_LLMError_PropagatesAsBuildError(t *testing.T) {
 	llmC := &stubLLM{err: errMessage("simulated upstream failure")}
 	_, err := New(llmC, "m").Build(context.Background(), specs.Spec{Wiki: "a", Page: "p", Kind: "editorial"}, kb.Snapshot{})

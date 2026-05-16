@@ -96,32 +96,37 @@ func TestScenario_FirstRender_ProjectionAgainstRealMediaWiki(t *testing.T) {
 		t.Fatalf("Run: %v\nReport: %s", err, rep.Summary())
 	}
 
-	// Find the area-vault.spec.md result and assert it rendered.
-	var areaVault *reporter.SpecResult
+	// projection-vault-smoke.spec.md is the dedicated projection
+	// fixture (page Test/Vault_Projection). area-vault.spec.md is now
+	// an editorial page, so the pure-projection L4 coverage lives
+	// here. Only the projection frontend is registered above, so the
+	// editorial specs in the same corpus report "no frontend" — that
+	// is expected and not asserted on.
+	var proj *reporter.SpecResult
 	for i := range rep.Specs {
-		if rep.Specs[i].ID == "area-vault.spec.md" {
-			areaVault = &rep.Specs[i]
+		if rep.Specs[i].ID == "projection-vault-smoke.spec.md" {
+			proj = &rep.Specs[i]
 		}
 	}
-	if areaVault == nil {
-		t.Fatalf("no area-vault.spec.md entry in report: %+v", rep.Specs)
+	if proj == nil {
+		t.Fatalf("no projection-vault-smoke.spec.md entry in report: %+v", rep.Specs)
 	}
-	if areaVault.Status != reporter.StatusRendered {
-		t.Fatalf("area-vault status = %q, want %q; reason=%q",
-			areaVault.Status, reporter.StatusRendered, areaVault.Reason)
+	if proj.Status != reporter.StatusRendered {
+		t.Fatalf("projection smoke status = %q, want %q; reason=%q",
+			proj.Status, reporter.StatusRendered, proj.Reason)
 	}
 
 	// Verify the page actually landed on the wiki by hitting
 	// /wiki/<title> directly and parsing the rendered HTML for
 	// expected content. Bypasses any GetPage roundtrip fragility.
-	verifyPageLanded(t, mw.URL, "Area/Vault_Architecture", []string{
+	verifyPageLanded(t, mw.URL, "Test/Vault_Projection", []string{
 		"Vault Architecture",  // the area's Name from fixtures
 		"Vault runs as an HA", // a fact from the fixture facts.jsonl
 		"VAULT-001",           // a decision id from decisions.jsonl
 	})
 	// The assertion the suite was missing: not just "words present"
 	// but "rendered as correct MediaWiki structure".
-	verifyRenderedStructure(t, mw.URL, "Area/Vault_Architecture")
+	verifyRenderedStructure(t, mw.URL, "Test/Vault_Projection")
 }
 
 // verifyPageLanded fetches the rendered HTML of a wiki page directly
