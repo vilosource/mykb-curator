@@ -1,13 +1,16 @@
-# Test MediaWiki fixture for local development.
+# Curator-ready MediaWiki for local/hand-driven use.
 #
-# Most tests use testcontainers-go to manage MediaWiki lifecycle
-# programmatically — this docker-compose file is the human-facing
-# equivalent for running a wiki locally to poke at by hand.
+# Scenario tests build + run the SAME Dockerfile via testcontainers;
+# this compose is the human-facing equivalent — first boot installs
+# the wiki (SQLite), enables uploads, and promotes Admin to bot.
 #
 # Usage:
-#   docker compose -f deployments/mediawiki/docker-compose.yml up -d
-#   open http://localhost:8181
-#   docker compose ... down -v
+#   docker compose -f deployments/mediawiki/docker-compose.yml up -d --build
+#   open http://localhost:8181        # login: Admin / adminpassword-9999
+#   docker compose -f deployments/mediawiki/docker-compose.yml down -v
+#
+# Data persists in the mediawiki-data volume across restarts (install
+# is idempotent — keyed on LocalSettings.php presence).
 
 services:
   mediawiki:
@@ -19,11 +22,11 @@ services:
     ports:
       - "8181:80"
     environment:
+      # Pin $wgServer for the fixed host port (bootstrap also falls
+      # back to per-request Host detection when this is unset).
       MW_SERVER: "http://localhost:8181"
     volumes:
       - mediawiki-data:/var/www/data
-      - mediawiki-uploads:/var/www/uploads
 
 volumes:
   mediawiki-data:
-  mediawiki-uploads:

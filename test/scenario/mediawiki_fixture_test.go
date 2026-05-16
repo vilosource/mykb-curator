@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -40,7 +42,6 @@ type mediawikiFixture struct {
 }
 
 const (
-	mediawikiImage    = "mediawiki:1.41"
 	scenarioAdmin     = "Admin"
 	scenarioAdminPass = "adminpassword-9999" // ≥10 chars, MW minimum
 	scenarioWikiName  = "ScenarioWiki"
@@ -50,17 +51,28 @@ func startMediaWiki(t *testing.T) *mediawikiFixture {
 	t.Helper()
 	ctx := context.Background()
 
+	// Build + run deployments/mediawiki/Dockerfile — the SINGLE
+	// SOURCE OF TRUTH. bootstrap.sh installs (first boot) then exec's
+	// apache, so once "/" responds the wiki is already curator-ready
+	// (uploads on, Admin in the bot group). This test is therefore
+	// also the regression proof that the real image works.
+	_, self, _, _ := runtime.Caller(0)
+	mwContext := filepath.Join(filepath.Dir(self), "..", "..", "deployments", "mediawiki")
 	req := testcontainers.ContainerRequest{
-		Image:        mediawikiImage,
+		FromDockerfile: testcontainers.FromDockerfile{
+			Context:    mwContext,
+			Dockerfile: "Dockerfile",
+			KeepImage:  true,
+		},
 		ExposedPorts: []string{"80/tcp"},
-		WaitingFor:   wait.ForHTTP("/").WithPort("80/tcp").WithStartupTimeout(2 * time.Minute),
+		WaitingFor:   wait.ForHTTP("/").WithPort("80/tcp").WithStartupTimeout(4 * time.Minute),
 	}
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
 		Started:          true,
 	})
 	if err != nil {
-		t.Fatalf("start mediawiki container: %v", err)
+		t.Fatalf("build/start mediawiki image: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = c.Terminate(ctx)
@@ -76,74 +88,12 @@ func startMediaWiki(t *testing.T) *mediawikiFixture {
 	}
 	url := fmt.Sprintf("http://%s:%s", host, port.Port())
 
-	// Ensure /var/www/data exists + is writable by www-data — the
-	// mediawiki image doesn't pre-create it.
-	rc, out, err := c.Exec(ctx, []string{"sh", "-c", "mkdir -p /var/www/data && chown -R www-data:www-data /var/www/data"})
-	if err != nil {
-		t.Fatalf("mkdir data exec: %v", err)
-	}
-	if rc != 0 {
-		body, _ := readStreamingOutput(out)
-		t.Fatalf("mkdir data exit %d:\n%s", rc, body)
-	}
-
-	// Install MediaWiki inside the container. SQLite avoids needing
-	// a companion mariadb container. Server URL must match the
-	// externally-visible host:port so the API generates correctly-
-	// rooted links.
-	installCmd := []string{
-		"php", "/var/www/html/maintenance/install.php",
-		"--dbtype=sqlite",
-		"--dbpath=/var/www/data",
-		"--pass=" + scenarioAdminPass,
-		"--server=" + url,
-		"--scriptpath=",
-		scenarioWikiName, scenarioAdmin,
-	}
-	rc, out, err = c.Exec(ctx, installCmd)
-	if err != nil {
-		t.Fatalf("install.php exec: %v", err)
-	}
-	installLog, _ := readStreamingOutput(out)
-	if rc != 0 {
-		t.Fatalf("install.php exit %d:\n%s", rc, installLog)
-	}
-	t.Logf("install.php stdout:\n%s", installLog)
-
-	// install.php ran as root (Exec default user); SQLite DB +
-	// LocalSettings.php are root-owned and unreadable by www-data,
-	// which serves the wiki. Fix ownership before Apache reads them.
-	//
-	// Also enable file uploads: $wgEnableUploads defaults to false in
-	// MediaWiki, but the RenderDiagrams pass uploads rendered diagrams
-	// via action=upload. Appending the flag to LocalSettings.php is
-	// the documented way to turn it on; harmless to other scenarios.
-	rc, out, _ = c.Exec(ctx, []string{"sh", "-c", `
-		printf '\n$wgEnableUploads = true;\n' >> /var/www/html/LocalSettings.php
-		chown -R www-data:www-data /var/www/data /var/www/html/LocalSettings.php
-		chmod 644 /var/www/html/LocalSettings.php
-		ls -la /var/www/html/LocalSettings.php /var/www/data/
-	`})
-	body, _ := readStreamingOutput(out)
-	t.Logf("perm fix-up (rc=%d):\n%s", rc, body)
-
-	// Promote Admin into the "bot" group. The curator's MediaWikiTarget
-	// asserts bot rights on every edit (production-grade safety: don't
-	// pose as a bot you're not). createAndPromote --force promotes an
-	// existing user without re-creating it.
-	rc, out, _ = c.Exec(ctx, []string{
-		"php", "/var/www/html/maintenance/createAndPromote.php",
-		"--bot", "--force", scenarioAdmin, scenarioAdminPass,
-	})
-	body, _ = readStreamingOutput(out)
-	if rc != 0 {
-		t.Fatalf("promote to bot exit %d:\n%s", rc, body)
-	}
-	t.Logf("promote to bot (rc=%d):\n%s", rc, body)
-
-	// Wait for /api.php to return real JSON (not the installer page).
-	if err := waitForAPI(url, 30*time.Second); err != nil {
-		t.Fatalf("/api.php never returned JSON: %v\nlast Localsettings status:\n%s", err, body)
+	// bootstrap.sh already installed + promoted the bot + enabled
+	// uploads before apache started, so we only wait for /api.php to
+	// serve real JSON. Generous timeout: first boot includes the
+	// install.php run.
+	if err := waitForAPI(url, 90*time.Second); err != nil {
+		t.Fatalf("/api.php never returned JSON: %v", err)
 	}
 
 	return &mediawikiFixture{
@@ -283,24 +233,3 @@ func postForJSONField(ctx context.Context, c *http.Client, urlStr string, form u
 	return s, nil
 }
 
-// readStreamingOutput drains a testcontainers exec output reader.
-// Best-effort — used only on failure paths.
-func readStreamingOutput(r interface {
-	Read([]byte) (int, error)
-}) (string, error) {
-	if r == nil {
-		return "", nil
-	}
-	var sb strings.Builder
-	buf := make([]byte, 8192)
-	for {
-		n, err := r.Read(buf)
-		if n > 0 {
-			sb.Write(buf[:n])
-		}
-		if err != nil {
-			break
-		}
-	}
-	return sb.String(), nil
-}
