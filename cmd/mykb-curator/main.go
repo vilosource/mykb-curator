@@ -27,6 +27,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/vilosource/mykb-curator/internal/adapters/curatorapi"
 	"github.com/vilosource/mykb-curator/internal/adapters/docspecs"
 	docspecslocalfs "github.com/vilosource/mykb-curator/internal/adapters/docspecs/localfs"
 	kbpkg "github.com/vilosource/mykb-curator/internal/adapters/kb"
@@ -68,6 +69,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/reporter"
 	"github.com/vilosource/mykb-curator/internal/reporter/sinks"
 	gitsrc "github.com/vilosource/mykb-curator/internal/sources/git"
+	"github.com/vilosource/mykb-curator/internal/specchat"
 	"github.com/vilosource/mykb-curator/internal/specs/docspec"
 )
 
@@ -88,7 +90,7 @@ func newRootCmd() *cobra.Command {
 		Use:   "mykb-curator",
 		Short: "Maintain human-facing wikis as curated projections of mykb",
 	}
-	root.AddCommand(newRunCmd(), newSpecCmd(), newReconcileCmd(), newReportCmd(), newVersionCmd())
+	root.AddCommand(newRunCmd(), newServeCmd(), newSpecCmd(), newReconcileCmd(), newReportCmd(), newVersionCmd())
 	return root
 }
 
@@ -116,6 +118,66 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&configPath, "config", "", "config file path (defaults to ~/.config/mykb-curator/<wiki>.yaml)")
 	cmd.Flags().StringVar(&outDir, "out", "", "if set, write rendered markdown for each spec to <out>/<spec-id>.md")
 	cmd.Flags().StringVar(&reportDir, "report-dir", "", "if set, write per-run report YAML to <report-dir>/<run-id>.yaml and update latest.yaml symlink")
+	return cmd
+}
+
+// newServeCmd starts the localhost curator-api the spec-chat Node
+// agent-service calls (design D1). Same compose* roots as `run`; it
+// adds NO domain logic — just transport over the existing engine.
+func newServeCmd() *cobra.Command {
+	var wiki, configPath, addr string
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Run the localhost spec-chat curator-api (for the Node agent-service)",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if wiki == "" {
+				return fmt.Errorf("--wiki is required")
+			}
+			if configPath == "" {
+				configPath = fmt.Sprintf("%s/.config/mykb-curator/%s.yaml", os.Getenv("HOME"), wiki)
+			}
+			cfg, err := config.Load(configPath)
+			if err != nil {
+				return err
+			}
+			if cfg.SpecStore.Type != "local" || cfg.SpecStore.Repo == "" {
+				return fmt.Errorf("serve requires spec_store.type=local with a repo path")
+			}
+			kbSrc, err := composeKBSource(cfg)
+			if err != nil {
+				return err
+			}
+			llmClient, err := composeLLMClient(cfg)
+			if err != nil {
+				return err
+			}
+			if llmClient == nil {
+				return fmt.Errorf("serve requires an LLM (llm.provider != none) for preview render+judge")
+			}
+			gitResolver := gitsrc.New(cfg.Sources.Git.Root, cfg.Sources.Git.Repos)
+			archFrontend := architecture.New(llmClient, cfg.LLM.Model, gitResolver)
+			previewer := specchat.NewPreviewer(kbSrc,
+				cluster.New(archFrontend), judge.New(llmClient, cfg.LLM.Model))
+			docStore := docspecslocalfs.New(cfg.SpecStore.Repo)
+
+			api := curatorapi.New(kbSrc, docStore, cfg.SpecStore.Repo,
+				specchat.NewShellKBWriter(), previewer)
+			srv := &http.Server{Addr: addr, Handler: api}
+
+			go func() {
+				<-cmd.Context().Done()
+				_ = srv.Close()
+			}()
+			fmt.Fprintf(os.Stderr, "curator-api listening on %s (wiki=%s)\n", addr, cfg.Wiki)
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				return err
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&wiki, "wiki", "", "wiki tenant name (matches the config filename)")
+	cmd.Flags().StringVar(&configPath, "config", "", "config file path (defaults to ~/.config/mykb-curator/<wiki>.yaml)")
+	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1:4773", "localhost bind address (never expose publicly: no auth, OAuth lives in the Node layer)")
 	return cmd
 }
 
