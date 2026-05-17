@@ -1,0 +1,9 @@
+{
+  "name": "mykb-curator-agent-service",
+  "private": true,
+  "type": "module",
+  "description": "Spec-chat Node agent-service: pi SDK -> curator-api (design Track A)",
+  "scripts": {
+    "test": "node --test test/"
+  }
+}
