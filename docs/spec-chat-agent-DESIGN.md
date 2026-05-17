@@ -7,11 +7,18 @@
 > slice 4 pi-web-ui browser surface (D7a); slice 5 the GRS-gap
 > capstone scenario (Judge verdict FLIPS fail→pass through the real
 > pipeline once the widen-sources remedy grounds the claim).
-> **Honest residual:** pi-web-ui full `ChatPanel.setAgent` rich
-> tool/streaming render is build-verified ONLY — the live-UX
-> Playwright smoke (the method spike-04 used) is the one carried
-> follow-up; v1 ships a conservative pi-web-ui-styled transcript +
-> the D2/D6 approval panel over the (tested) RemoteAgent transport.
+> **Live-UX CLOSED 2026-05-17:** the shipped v1 surface (pi-web-ui-
+> styled transcript + D2/D6 approval panel over RemoteAgent) was
+> driven in a REAL browser (Playwright, spike-04's method) against
+> the real built SPA + real static server, Agent/LLM stubbed
+> (deterministic, no OAuth): SPA renders; a turn round-trips through
+> `/chat`; the full propose → "Approval required (D2/D6)" panel →
+> Approve (`/approve` round-trip) → auto re-prompt → "Applied" loop
+> works end to end. Repeatable via `agent-service/scripts/
+> smoke-web.mjs` (see §6). The earlier "build-verified only" caveat
+> is resolved for what v1 ships. Full `ChatPanel.setAgent` rich
+> tool/streaming rendering remains a deliberate **v2 enhancement**
+> (explicitly out of v1 scope per D7), NOT a carried defect.
 > Foundations: `github.com/vilosource/pi-sdk` `pattern/PATTERN.md`
 > (the agentic-workflow pattern) + mykb-curator internal packages
 > (verified surface map, 2026-05-17).
@@ -170,3 +177,21 @@ protocol); entry lands in `incoming`/unverified zone; a human must
 (iv) **Gate:** propose-diff → explicit human ACK → write; never
 autosave; the brain write is a hard-HITL mutation (same posture as
 spec apply, higher stakes).
+
+## 6. Live-UX smoke (repeatable)
+
+Deterministic, $0, no OAuth — the real built SPA + real static
+server + real RemoteAgent transport, Agent/LLM stubbed:
+
+```sh
+cd agent-service
+docker build -t mykb-curator-agent-service:dev .
+docker run --rm -v "$PWD/scripts:/pi/app/scripts:ro" \
+  -e HOST=0.0.0.0 -e WEB_ROOT=/pi/app/web/dist -e PORT=4774 \
+  -p 127.0.0.1:4778:4774 mykb-curator-agent-service:dev \
+  sh -c 'cd /pi/app && node scripts/smoke-web.mjs'
+# then drive http://127.0.0.1:4778 in a browser (or Playwright):
+# type a "widen the sources" prompt -> the D2/D6 "Approval
+# required" panel appears -> Approve & apply -> auto re-prompt ->
+# "Applied". Verified live 2026-05-17 (status header).
+```
