@@ -22,6 +22,7 @@ import (
 // fakeKB returns a fixed snapshot.
 type fakeKB struct {
 	commit string
+	areas  []kb.Area
 	err    error
 }
 
@@ -29,7 +30,7 @@ func (f fakeKB) Pull(ctx context.Context) (kb.Snapshot, error) {
 	if f.err != nil {
 		return kb.Snapshot{}, f.err
 	}
-	return kb.Snapshot{Commit: f.commit}, nil
+	return kb.Snapshot{Commit: f.commit, Areas: f.areas}, nil
 }
 func (fakeKB) DiffSince(context.Context, string) ([]string, error) {
 	return nil, kb.ErrDiffNotSupported

@@ -116,6 +116,59 @@ func TestRun_DocSpecCluster_RendersPushesAndJudges(t *testing.T) {
 	}
 }
 
+// capturingJudgeLLM records every judge prompt so we can assert the
+// resolved kb grounding actually reaches the Judge.
+type capturingJudgeLLM struct{ prompts []string }
+
+func (c *capturingJudgeLLM) Complete(_ context.Context, r llm.Request) (llm.Response, error) {
+	c.prompts = append(c.prompts, r.Prompt)
+	return llm.Response{Text: `{"pass": true, "reason": "ok", "ungrounded_claims": []}`}, nil
+}
+
+func TestRun_DocSpec_JudgeReceivesResolvedKBGrounding(t *testing.T) {
+	spec, err := docspec.Parse([]byte(
+		"topic: Vault\n" +
+			"parent:\n" +
+			"  page: Vault Architecture\n" +
+			"  kind: architecture\n" +
+			"  intent: Understand Vault.\n" +
+			"  sections:\n" +
+			"    - title: Overview\n" +
+			"      intent: Topology and unseal.\n" +
+			"      sources: [\"kb:area=vault\"]\n"))
+	if err != nil {
+		t.Fatalf("docspec.Parse: %v", err)
+	}
+	cj := &capturingJudgeLLM{}
+	o := New(Deps{
+		Wiki: "acme",
+		KB: fakeKB{commit: "abc", areas: []kb.Area{{
+			ID: "vault", Name: "Vault", Summary: "HA secrets manager",
+			Entries: []kb.Entry{{ID: "f1", Type: "fact", Text: "3 replicas + 1 backup, image 1.19.5"}},
+		}}},
+		Specs:      fakeSpecs{},
+		WikiTarget: fakeWiki{},
+		Backend:    fakeBackend{},
+		DocSpecs:   fakeDocSpecs{files: []docspecs.File{{ID: "vault.doc.yaml", Spec: spec}}},
+		Cluster:    cluster.New(fakeRenderer{}),
+		Judge:      judge.New(cj, "m"),
+	})
+
+	if _, err := o.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(cj.prompts) == 0 {
+		t.Fatal("judge was never called")
+	}
+	joined := strings.Join(cj.prompts, "\n====\n")
+	// The resolved kb entry — not just the "kb:area=vault" identifier
+	// — must be in the judge prompt so it verifies, not guesses.
+	if !strings.Contains(joined, "3 replicas + 1 backup, image 1.19.5") ||
+		!strings.Contains(joined, "### Area: vault") {
+		t.Errorf("resolved kb grounding did not reach the Judge:\n%s", joined)
+	}
+}
+
 func TestRun_DocSpec_Unwired_IsNoOp(t *testing.T) {
 	o := New(Deps{
 		Wiki: "acme", KB: fakeKB{commit: "abc"}, Specs: fakeSpecs{},

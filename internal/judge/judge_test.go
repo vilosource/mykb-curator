@@ -62,7 +62,7 @@ func TestReview_JudgesOnlyIntentBearingProseSections(t *testing.T) {
 		"Diagram Only": "no intent declared",
 	})
 
-	rep, err := New(llmC, "m").Review(context.Background(), page(), doc)
+	rep, err := New(llmC, "m").Review(context.Background(), page(), doc, nil)
 	if err != nil {
 		t.Fatalf("Review: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestReview_FlagsUngroundedClaims(t *testing.T) {
 	}}
 	doc := proseDoc(map[string]string{"Overview": "We run Vault 1.15.2."})
 
-	rep, err := New(llmC, "m").Review(context.Background(), page(), doc)
+	rep, err := New(llmC, "m").Review(context.Background(), page(), doc, nil)
 	if err != nil {
 		t.Fatalf("Review: %v", err)
 	}
@@ -100,10 +100,56 @@ func TestReview_FlagsUngroundedClaims(t *testing.T) {
 	}
 }
 
+func TestReview_GroundingReachesPromptAndSystemDemandsVerification(t *testing.T) {
+	llmC := &seqLLM{resp: []string{`{"pass": true, "reason": "ok", "ungrounded_claims": []}`}}
+	doc := proseDoc(map[string]string{"Overview": "We run a 5-node Raft cluster."})
+	grounding := map[string]string{
+		"Overview": "### Area: vault — Vault\n- [fact/f1] 5-node Raft cluster\n",
+	}
+
+	rep, err := New(llmC, "m").Review(context.Background(), page(), doc, grounding)
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	p := llmC.seen[0].Prompt
+	// The actual source material — not just the source identifiers —
+	// must reach the Judge so it can verify rather than guess.
+	if !strings.Contains(p, "5-node Raft cluster") || !strings.Contains(p, "### Area: vault") {
+		t.Errorf("resolved grounding must be in the judge prompt:\n%s", p)
+	}
+	// The system prompt must instruct verification AGAINST the shown
+	// grounding (a claim supported there is grounded).
+	low := strings.ToLower(llmC.seen[0].System)
+	if !strings.Contains(low, "grounding") || !strings.Contains(low, "supported") {
+		t.Errorf("system prompt must demand verification against shown grounding: %q", llmC.seen[0].System)
+	}
+	if !rep.AllPass() {
+		t.Errorf("expected pass: %+v", rep.Verdicts)
+	}
+}
+
+func TestReview_NoGroundingMustNotInviteUngroundedFalsePositives(t *testing.T) {
+	// The run-3 Judge bug: with no source content shown, the Judge
+	// flagged kb-backed facts as ungrounded. With no grounding the
+	// prompt must explicitly tell it NOT to infer ungroundedness from
+	// the absence of grounding (judge intent only).
+	llmC := &seqLLM{resp: []string{`{"pass": true, "reason": "ok", "ungrounded_claims": []}`}}
+	doc := proseDoc(map[string]string{"Overview": "We run Vault 1.19.5."})
+
+	if _, err := New(llmC, "m").Review(context.Background(), page(), doc, nil); err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	p := strings.ToLower(llmC.seen[0].Prompt)
+	if !strings.Contains(p, "no") || !strings.Contains(p, "grounding") ||
+		(!strings.Contains(p, "do not infer") && !strings.Contains(p, "review intent only")) {
+		t.Errorf("absent grounding must not invite ungrounded false-positives:\n%s", llmC.seen[0].Prompt)
+	}
+}
+
 func TestReview_EmptySectionFailsWithoutLLMCall(t *testing.T) {
 	llmC := &seqLLM{}
 	doc := proseDoc(map[string]string{}) // Overview absent
-	rep, err := New(llmC, "m").Review(context.Background(), page(), doc)
+	rep, err := New(llmC, "m").Review(context.Background(), page(), doc, nil)
 	if err != nil {
 		t.Fatalf("Review: %v", err)
 	}
@@ -118,7 +164,7 @@ func TestReview_EmptySectionFailsWithoutLLMCall(t *testing.T) {
 func TestReview_UnparseableResponseIsInconclusiveNotPass(t *testing.T) {
 	llmC := &seqLLM{resp: []string{"the section looks fine to me"}}
 	doc := proseDoc(map[string]string{"Overview": "Vault prose."})
-	rep, _ := New(llmC, "m").Review(context.Background(), page(), doc)
+	rep, _ := New(llmC, "m").Review(context.Background(), page(), doc, nil)
 
 	v := rep.Verdicts[0]
 	if v.Pass || !v.Inconclusive {
@@ -132,7 +178,7 @@ func TestReview_UnparseableResponseIsInconclusiveNotPass(t *testing.T) {
 func TestReview_LLMErrorIsReturned(t *testing.T) {
 	llmC := &seqLLM{err: errors.New("boom")}
 	doc := proseDoc(map[string]string{"Overview": "x"})
-	if _, err := New(llmC, "m").Review(context.Background(), page(), doc); err == nil {
+	if _, err := New(llmC, "m").Review(context.Background(), page(), doc, nil); err == nil {
 		t.Fatal("an LLM transport error must be returned (distinct from a fail verdict)")
 	}
 }

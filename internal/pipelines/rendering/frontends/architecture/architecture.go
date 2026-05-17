@@ -231,19 +231,51 @@ func (f *Frontend) resolveSources(ctx context.Context, srcs []docspec.Source, sn
 		if !ok {
 			continue
 		}
-		fmt.Fprintf(&digest, "### Area: %s — %s\n", a.ID, a.Name)
-		if a.Summary != "" {
-			fmt.Fprintf(&digest, "Summary: %s\n", a.Summary)
-		}
-		for _, e := range entries {
-			fmt.Fprintf(&digest, "- [%s/%s] %s\n", e.Type, e.ID, e.Text)
-			if e.Why != "" {
-				fmt.Fprintf(&digest, "    Why: %s\n", e.Why)
-			}
-		}
-		digest.WriteByte('\n')
+		writeKBDigest(&digest, a, entries)
 	}
 	return digest.String(), nonKB, nil
+}
+
+// writeKBDigest is the single source of truth for the kb grounding
+// format. Synthesis (resolveSources) and the report-only Judge
+// (SectionGrounding) both go through it, so the Judge verifies
+// claims against byte-identical text to what synthesis was given.
+func writeKBDigest(sb *strings.Builder, a *kb.Area, entries []kb.Entry) {
+	fmt.Fprintf(sb, "### Area: %s — %s\n", a.ID, a.Name)
+	if a.Summary != "" {
+		fmt.Fprintf(sb, "Summary: %s\n", a.Summary)
+	}
+	for _, e := range entries {
+		fmt.Fprintf(sb, "- [%s/%s] %s\n", e.Type, e.ID, e.Text)
+		if e.Why != "" {
+			fmt.Fprintf(sb, "    Why: %s\n", e.Why)
+		}
+	}
+	sb.WriteByte('\n')
+}
+
+// SectionGrounding returns the kb grounding digest for a section's
+// `kb:` sources — the exact text the architecture synthesis is
+// grounded in — so the report-only Judge can verify organisation-
+// specific claims against the real sources instead of guessing.
+//
+// Non-kb (resolver, e.g. git:) grounding is intentionally out of
+// scope here: kb is the grounding whose absence made the Judge
+// false-positive kb-backed facts. Extend when a non-kb-grounded
+// section is empirically shown to false-positive.
+func SectionGrounding(snap kb.Snapshot, sec docspec.DocSection) string {
+	var sb strings.Builder
+	for _, s := range sec.Sources {
+		if s.Scheme != "kb" {
+			continue
+		}
+		a, entries, ok := ResolveKB(snap, s)
+		if !ok {
+			continue
+		}
+		writeKBDigest(&sb, a, entries)
+	}
+	return sb.String()
 }
 
 // ResolveKB resolves a `kb:area=<id> [tag=a,b] [zone=x,y]` source

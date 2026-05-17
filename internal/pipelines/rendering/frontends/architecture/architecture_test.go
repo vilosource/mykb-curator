@@ -308,6 +308,44 @@ func TestRender_NoResolverForScheme_StaysPending(t *testing.T) {
 	}
 }
 
+func TestSectionGrounding_IsTheKBDigestSynthesisWasGiven(t *testing.T) {
+	// The report-only Judge must verify claims against EXACTLY the
+	// grounding synthesis received. SectionGrounding exposes that
+	// kb digest; it must equal what composeSectionPrompt embeds, so
+	// the Judge stops false-positiving kb-backed facts as ungrounded.
+	snap := vaultSnap()
+	sec := docspec.DocSection{
+		Title: "System Architecture", Intent: "topology",
+		Sources: []docspec.Source{src(t, "kb:area=vault tag=ha,raft")},
+	}
+	g := SectionGrounding(snap, sec)
+
+	if !strings.Contains(g, "### Area: vault — Vault") {
+		t.Errorf("grounding missing area header:\n%s", g)
+	}
+	if !strings.Contains(g, "[fact/f1] 5-node Raft cluster") {
+		t.Errorf("grounding missing the resolved entry:\n%s", g)
+	}
+	if strings.Contains(g, "Day-2 only thing") {
+		t.Errorf("grounding must honour the source's tag filter:\n%s", g)
+	}
+	// Single source of truth: it is byte-identical to the kb digest
+	// the synthesis prompt is grounded in for the same section.
+	prompt := composeSectionPrompt(docspec.DocPage{Page: "P"}, sec, g, nil)
+	if !strings.Contains(prompt, strings.TrimSpace(g)) {
+		t.Errorf("SectionGrounding must match the digest fed to synthesis:\ng=%q", g)
+	}
+
+	// Non-kb scheme contributes nothing here (kb is the grounding the
+	// Judge needs); empty when no kb source resolves.
+	none := SectionGrounding(snap, docspec.DocSection{
+		Sources: []docspec.Source{src(t, "git:repo/x")},
+	})
+	if none != "" {
+		t.Errorf("non-kb source must yield no kb grounding, got %q", none)
+	}
+}
+
 func TestFoldSection_HeadingLedResponseStillFillsDeclaredSection(t *testing.T) {
 	// The model led with a sub-heading and gave no lead prose (the
 	// contract-hardened prompt nudges enumerated/structured output).

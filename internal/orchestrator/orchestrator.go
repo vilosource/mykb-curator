@@ -25,6 +25,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/cluster"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/architecture"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/reconciler"
@@ -240,7 +241,20 @@ func (o *Orchestrator) processClusterPage(ctx context.Context, dsID string, p cl
 	// Judge BEFORE push — report-only. A failing or inconclusive
 	// verdict is a warning on the report, never a push gate.
 	if o.deps.Judge != nil && page.Page != "" {
-		if rep, jerr := o.deps.Judge.Review(ctx, page, doc); jerr != nil {
+		// Give the Judge the SAME kb grounding synthesis received, so
+		// it verifies organisation-specific claims against the real
+		// sources instead of guessing (and false-positiving kb-backed
+		// facts). Keyed by section title, matching Judge.Review.
+		grounding := make(map[string]string, len(page.Sections))
+		for _, sec := range page.Sections {
+			if sec.Render != "" || strings.TrimSpace(sec.Intent) == "" {
+				continue // structural / no contract — Judge skips it too
+			}
+			if g := architecture.SectionGrounding(snap, sec); g != "" {
+				grounding[sec.Title] = g
+			}
+		}
+		if rep, jerr := o.deps.Judge.Review(ctx, page, doc, grounding); jerr != nil {
 			rb.AddWarning(fmt.Sprintf("judge %q: %v", p.Page, jerr))
 		} else if !rep.AllPass() {
 			rb.AddWarning(fmt.Sprintf("judge %q: %s", p.Page, summariseVerdicts(rep)))

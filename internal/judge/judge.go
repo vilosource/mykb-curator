@@ -72,7 +72,12 @@ func New(client llm.Client, model string) *Judge {
 // against page. It returns a Report; it never returns an error for a
 // failing verdict (failure is data, not an error). A non-nil error
 // means the LLM call itself failed.
-func (j *Judge) Review(ctx context.Context, page docspec.DocPage, doc ir.Document) (Report, error) {
+// grounding maps a section title to the resolved source material the
+// synthesis was given for it (architecture.SectionGrounding). A nil
+// or absent entry means no machine-resolvable grounding was supplied;
+// the Judge then reviews intent only and must NOT infer ungrounded
+// claims from that absence.
+func (j *Judge) Review(ctx context.Context, page docspec.DocPage, doc ir.Document, grounding map[string]string) (Report, error) {
 	rep := Report{Page: page.Page}
 	bodies := proseByHeading(doc)
 
@@ -91,7 +96,7 @@ func (j *Judge) Review(ctx context.Context, page docspec.DocPage, doc ir.Documen
 		resp, err := j.llm.Complete(ctx, llm.Request{
 			Model:     j.model,
 			System:    systemPrompt,
-			Prompt:    composePrompt(page, sec, body),
+			Prompt:    composePrompt(page, sec, body, grounding[sec.Title]),
 			MaxTokens: 1024,
 		})
 		if err != nil {
@@ -121,14 +126,20 @@ func proseByHeading(doc ir.Document) map[string]string {
 	return out
 }
 
-const systemPrompt = `You are a documentation reviewer. You judge whether a wiki section delivers on its stated intent and whether every organisation-specific claim is grounded in the supplied source material.
+const systemPrompt = `You are a documentation reviewer. You judge whether a wiki section delivers on its stated intent and whether every organisation-specific claim is supported by the grounding shown to you.
 
 Reply with ONLY a JSON object, no prose around it:
-{"pass": <bool>, "reason": "<one sentence>", "ungrounded_claims": ["<verbatim claim not supported by the sources>", ...]}
+{"pass": <bool>, "reason": "<one sentence>", "ungrounded_claims": ["<verbatim claim not supported by the shown grounding>", ...]}
 
-pass=false if the section does not satisfy the intent OR contains an organisation-specific claim (a version, host, topology, decision, credential) absent from the sources. General, well-known background about the technology itself is not an ungrounded claim. ungrounded_claims is [] when there are none.`
+Verify every organisation-specific claim (a version, host, topology, count, decision, credential) against the "Source grounding" block:
+- A claim that is supported by the shown grounding IS grounded — do NOT flag it.
+- An organisation-specific claim absent from the shown grounding is ungrounded.
+- General, well-known background about the technology itself is never an ungrounded claim.
+- If NO grounding is shown for the section, you cannot assess groundedness: review the intent only and return ungrounded_claims: [] — never infer ungroundedness from the absence of grounding.
 
-func composePrompt(page docspec.DocPage, sec docspec.DocSection, body string) string {
+pass=false only if the section does not satisfy the intent OR has a genuinely ungrounded organisation-specific claim. ungrounded_claims is [] when there are none.`
+
+func composePrompt(page docspec.DocPage, sec docspec.DocSection, body, grounding string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Page intent: %s\n\n", page.Intent)
 	fmt.Fprintf(&sb, "Section: %s\n", sec.Title)
@@ -139,6 +150,13 @@ func composePrompt(page docspec.DocPage, sec docspec.DocSection, body string) st
 			fmt.Fprintf(&sb, "- %s\n", s.Raw)
 		}
 		sb.WriteByte('\n')
+	}
+	if g := strings.TrimSpace(grounding); g != "" {
+		sb.WriteString("Source grounding (the resolved source material this section must be faithful to — verify every organisation-specific claim against THIS; a claim supported here is grounded):\n---\n")
+		sb.WriteString(g)
+		sb.WriteString("\n---\n\n")
+	} else {
+		sb.WriteString("Source grounding: NONE was machine-resolvable for this section's sources. You therefore cannot assess groundedness — review intent only and do not infer ungrounded claims from this absence.\n\n")
 	}
 	sb.WriteString("Rendered section text:\n---\n")
 	sb.WriteString(body)
