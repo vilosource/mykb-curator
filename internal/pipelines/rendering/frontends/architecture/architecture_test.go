@@ -416,6 +416,28 @@ func TestComposeSectionPrompt_EnforcesContractGroundingAndHonestGaps(t *testing.
 	}
 }
 
+func TestComposeSectionPrompt_ForcesPerItemCoverageLedger(t *testing.T) {
+	// Run-4 residue: under rich grounding the model wrote fluent but
+	// OFF-CONTRACT prose and treated the gap-note as optional. The
+	// prompt must make the per-item reconciliation a hard closing
+	// step and name that exact failure as unacceptable.
+	page := docspec.DocPage{Page: "P", Intent: "i"}
+	sec := docspec.DocSection{Title: "Deployment & Operations",
+		Intent: "rolling updates, the vault-to-swarm-sync bridge, daily Raft snapshots to GRS"}
+	p := strings.ToLower(composeSectionPrompt(page, sec, "### Area: vault\n- [fact/f1] bridge\n", nil))
+
+	if !strings.Contains(p, "before finishing") && !strings.Contains(p, "before you finish") {
+		t.Errorf("prompt must require an explicit end-of-write contract reconciliation:\n%s", p)
+	}
+	if !strings.Contains(p, "each item") {
+		t.Errorf("prompt must force a per-item check:\n%s", p)
+	}
+	if !strings.Contains(p, "off-contract") && !strings.Contains(p, "off contract") &&
+		!strings.Contains(p, "adjacent") && !strings.Contains(p, "related but") {
+		t.Errorf("prompt must name off-contract substitution as the failure to avoid:\n%s", p)
+	}
+}
+
 func TestPersonaBase_CarriesFullContractRule(t *testing.T) {
 	low := strings.ToLower(persona(""))
 	if !strings.Contains(low, "contract") {
