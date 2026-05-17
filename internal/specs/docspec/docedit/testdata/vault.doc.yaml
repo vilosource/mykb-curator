@@ -1,0 +1,117 @@
+# Vault topic cluster — a faithful projection of the hand-crafted
+# wiki.optiscangroup.com "Vault Architecture" page (read 2026-05-17)
+# plus an llm-reference dump child (the machine-oriented page, kept
+# OFF the human pages). Grounded in the real ~/.mykb areas.
+topic: Vault
+
+parent:
+  page: Vault Architecture
+  kind: architecture
+  audience: human-operator
+  intent: >
+    A reader with zero prior context understands what HashiCorp Vault
+    is, how Optiscan deploys it (HA Raft, Azure Key Vault auto-unseal,
+    Swarm + Traefik, Entra OIDC), how it is operated day-2, and how it
+    is recovered in a DR event.
+  sections:
+    - title: System Architecture
+      intent: >
+        Explain Vault the technology briefly, then Optiscan's specific
+        deployment: 3-node HA Raft cluster on Docker Swarm, Azure Key
+        Vault auto-unseal, Traefik ingress, Entra ID OIDC SSO. Include
+        a small architecture diagram.
+      sources: ["kb:area=vault"]
+    - title: Deployment & Operations
+      intent: >
+        How the stack is deployed and operated safely: rolling updates,
+        the vault-to-swarm-sync secret bridge, daily Raft snapshot
+        backups to GRS.
+      sources: ["kb:area=vault", "kb:area=docker-swarm"]
+    - title: Disaster Recovery
+      intent: >
+        The automated DR recovery flow for Vault, including how the
+        unseal circular dependency on Azure Key Vault is handled.
+      sources: ["kb:area=disaster-recovery", "kb:area=vault"]
+    - title: Operational Runbooks
+      render: child-index
+    - title: Source Code & IaC
+      render: table
+      sources:
+        - "git:infrastructure/azure-optiscangroup/services/infra/infra-docker-stacks/hashicorp-vault"
+  related:
+    - Docker Swarm Platform
+    - Disaster Recovery
+    - Wildcard SSL Automation
+  categories:
+    - Azure Infrastructure
+    - Infrastructure Services Stacks
+    - Security
+    - Vault
+
+children:
+  - page: Vault Operations
+    kind: runbook
+    audience: human-operator
+    intent: >
+      Day-2 operator runbook: deployment, seal/unseal, Raft storage
+      management, backup/restore, health checks, credential management.
+    sections:
+      - title: Routine Operations
+        intent: Seal/unseal, health checks, rolling updates, node replacement.
+        sources: ["kb:area=vault"]
+      - title: Backup & Restore
+        intent: Raft snapshot capture, GRS upload, restore procedure.
+        sources: ["kb:area=vault", "kb:area=backup"]
+
+  - page: Vault JWT Auth Reference
+    kind: reference
+    audience: human-operator
+    intent: >
+      The three-tier secret access model, JWT role configuration,
+      CI/CD templates, and how to enroll a new service.
+    sections:
+      - title: Secret Access Model
+        intent: The three-tier model and JWT/OIDC role configuration.
+        sources: ["kb:area=vault"]
+      - title: Enrolling a New Service
+        intent: Step-by-step for granting a new workload Vault access.
+        sources: ["kb:area=vault"]
+
+  - page: Vault Ansible Integration
+    kind: integration
+    audience: human-operator
+    intent: >
+      How Ansible roles consume Vault secrets — the controller-side
+      fetch + SSH push pattern, idempotency rules, and anti-patterns.
+    sections:
+      - title: Fetch-and-Push Pattern
+        intent: Controller-side fetch then SSH push; why, and the idempotency rules.
+        sources: ["kb:area=vault", "kb:area=iac"]
+      - title: Anti-patterns
+        intent: What never to do when wiring Vault into Ansible.
+        sources: ["kb:area=vault", "kb:area=iac"]
+
+  - page: Vault DR Restore
+    kind: runbook
+    audience: human-operator
+    intent: >
+      The 7-phase procedure for restoring Vault from a Raft snapshot
+      into the DR environment, including break-glass key handling.
+    sections:
+      - title: 7-Phase Restore Procedure
+        intent: Validation → bootstrap → Raft restore → auto-join → smoke test, phase by phase.
+        sources: ["kb:area=disaster-recovery", "kb:area=vault"]
+
+  # The 1:1 machine-oriented dump — deliberately a SEPARATE
+  # llm-reference page, NOT one of the human pages above.
+  - page: Vault Reference
+    kind: reference
+    audience: llm-reference
+    intent: >
+      Exhaustive, terse, machine-readable enumeration of every Vault
+      fact, decision, gotcha and pattern in the brain — for an LLM or
+      automation to consume, not a human narrative.
+    sections:
+      - title: Vault Knowledge Base Dump
+        intent: Every vault-area entry, dense and complete, minimal prose.
+        sources: ["kb:area=vault"]
