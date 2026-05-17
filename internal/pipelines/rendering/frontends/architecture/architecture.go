@@ -177,15 +177,18 @@ func firstLine(s string) string {
 }
 
 // foldSection turns the LLM's parsed output into IR sections under
-// the declared section title. The first no-heading chunk becomes the
-// declared section's body; any sub-headings the LLM added (despite
-// instructions) become flattened sibling sections (content + label
-// preserved, never leaked markup). Empty output yields a visible
-// gap marker, not a silently dropped section.
+// the declared section title. The model's FIRST chunk always becomes
+// the declared section's body — even if the model leaked a leading
+// sub-heading (the spec-declared title is authoritative; its heading
+// is discarded, never the content). Any further sub-headings the
+// model added become flattened sibling sections (content + label
+// preserved, never leaked markup). A section the model produced prose
+// for is therefore never reported empty; only genuinely empty output
+// yields the visible gap marker, never a silently dropped section.
 func foldSection(title string, parsed []ir.Section, hash string) []ir.Section {
 	out := []ir.Section{{Heading: title}}
 	for i, p := range parsed {
-		if i == 0 && p.Heading == "" {
+		if i == 0 {
 			out[0].Blocks = p.Blocks
 			continue
 		}

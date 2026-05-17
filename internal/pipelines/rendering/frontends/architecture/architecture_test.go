@@ -308,6 +308,38 @@ func TestRender_NoResolverForScheme_StaysPending(t *testing.T) {
 	}
 }
 
+func TestFoldSection_HeadingLedResponseStillFillsDeclaredSection(t *testing.T) {
+	// The model led with a sub-heading and gave no lead prose (the
+	// contract-hardened prompt nudges enumerated/structured output).
+	// The spec-declared section must still OWN that content — a
+	// section the model produced prose for must never be reported
+	// empty, and the gap marker must NOT fire when real content exists.
+	parsed := []ir.Section{
+		{Heading: "Phase 1", Blocks: []ir.Block{ir.ProseBlock{Text: "validate the snapshot"}}},
+		{Heading: "Phase 2", Blocks: []ir.Block{ir.ProseBlock{Text: "bootstrap the node"}}},
+	}
+	out := foldSection("7-Phase Restore Procedure", parsed, "h")
+
+	if len(out) == 0 || out[0].Heading != "7-Phase Restore Procedure" {
+		t.Fatalf("declared title must head the section: %+v", out)
+	}
+	if len(out[0].Blocks) == 0 {
+		t.Fatalf("declared section must own the model's first chunk, got empty: %+v", out)
+	}
+	if pb, ok := out[0].Blocks[0].(ir.ProseBlock); !ok ||
+		!strings.Contains(pb.Text, "validate the snapshot") {
+		t.Fatalf("declared section body should be the model's content: %+v", out[0].Blocks)
+	}
+	if pb, ok := out[0].Blocks[0].(ir.ProseBlock); ok &&
+		strings.Contains(pb.Text, "No content was available") {
+		t.Fatalf("spurious gap marker despite real content: %+v", out)
+	}
+	// Subsequent chunks remain flattened siblings (design unchanged).
+	if len(out) != 2 || out[1].Heading != "Phase 2" {
+		t.Fatalf("later chunks must stay flattened siblings: %+v", out)
+	}
+}
+
 func TestComposeSectionPrompt_EnforcesContractGroundingAndHonestGaps(t *testing.T) {
 	page := docspec.DocPage{Page: "Vault Architecture", Intent: "Understand Vault."}
 	sec := docspec.DocSection{Title: "System Architecture", Intent: "3-node Raft + auto-unseal; include a diagram."}
