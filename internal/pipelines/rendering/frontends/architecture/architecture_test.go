@@ -353,28 +353,34 @@ func TestFoldSection_HeadingLedResponseStillFillsDeclaredSection(t *testing.T) {
 	// section the model produced prose for must never be reported
 	// empty, and the gap marker must NOT fire when real content exists.
 	parsed := []ir.Section{
-		{Heading: "Phase 1", Blocks: []ir.Block{ir.ProseBlock{Text: "validate the snapshot"}}},
+		{Heading: "", Blocks: []ir.Block{ir.ProseBlock{Text: "lead prose"}}},
+		{Heading: "vault-to-swarm-sync bridge", Blocks: []ir.Block{ir.ProseBlock{Text: "the bridge script"}}},
 		{Heading: "Phase 2", Blocks: []ir.Block{ir.ProseBlock{Text: "bootstrap the node"}}},
 	}
-	out := foldSection("7-Phase Restore Procedure", parsed, "h")
+	out := foldSection("Deployment & Operations", parsed, "h")
 
-	if len(out) == 0 || out[0].Heading != "7-Phase Restore Procedure" {
-		t.Fatalf("declared title must head the section: %+v", out)
+	// The spec owns the page IA: foldSection yields EXACTLY the one
+	// declared section. Model sub-headings are demoted to in-section
+	// lead-ins, never promoted to page-level siblings (which would
+	// fragment the page and hide content from the per-section Judge).
+	if len(out) != 1 || out[0].Heading != "Deployment & Operations" {
+		t.Fatalf("must be exactly the one declared section, no siblings: %+v", out)
 	}
-	if len(out[0].Blocks) == 0 {
-		t.Fatalf("declared section must own the model's first chunk, got empty: %+v", out)
+	var all strings.Builder
+	for _, b := range out[0].Blocks {
+		if pb, ok := b.(ir.ProseBlock); ok {
+			all.WriteString(pb.Text)
+			all.WriteByte('\n')
+		}
 	}
-	if pb, ok := out[0].Blocks[0].(ir.ProseBlock); !ok ||
-		!strings.Contains(pb.Text, "validate the snapshot") {
-		t.Fatalf("declared section body should be the model's content: %+v", out[0].Blocks)
+	body := all.String()
+	for _, want := range []string{"lead prose", "vault-to-swarm-sync bridge", "the bridge script", "bootstrap the node"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("declared section must contain all model content (%q) so the Judge sees it:\n%s", want, body)
+		}
 	}
-	if pb, ok := out[0].Blocks[0].(ir.ProseBlock); ok &&
-		strings.Contains(pb.Text, "No content was available") {
-		t.Fatalf("spurious gap marker despite real content: %+v", out)
-	}
-	// Subsequent chunks remain flattened siblings (design unchanged).
-	if len(out) != 2 || out[1].Heading != "Phase 2" {
-		t.Fatalf("later chunks must stay flattened siblings: %+v", out)
+	if strings.Contains(body, "No content was available") {
+		t.Fatalf("spurious gap marker despite real content: %s", body)
 	}
 }
 

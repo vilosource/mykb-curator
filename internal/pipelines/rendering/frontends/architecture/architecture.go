@@ -176,31 +176,35 @@ func firstLine(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// foldSection turns the LLM's parsed output into IR sections under
-// the declared section title. The model's FIRST chunk always becomes
-// the declared section's body — even if the model leaked a leading
-// sub-heading (the spec-declared title is authoritative; its heading
-// is discarded, never the content). Any further sub-headings the
-// model added become flattened sibling sections (content + label
-// preserved, never leaked markup). A section the model produced prose
-// for is therefore never reported empty; only genuinely empty output
+// foldSection returns the declared section, self-contained. The
+// doc-spec owns the page's information architecture, so ALL of the
+// model's output stays under the spec-declared title: any sub-heading
+// the model emitted (e.g. to enumerate a multi-item contract) is
+// demoted to an in-section bold lead-in, never promoted to a
+// page-level sibling. Sibling promotion would both fragment the page
+// away from the spec and hide that content from the report-only
+// Judge, which reviews strictly per declared section (an empirically
+// observed false-negative: contract content the model wrote under a
+// sub-heading was judged "not covered"). Genuinely empty output
 // yields the visible gap marker, never a silently dropped section.
 func foldSection(title string, parsed []ir.Section, hash string) []ir.Section {
-	out := []ir.Section{{Heading: title}}
-	for i, p := range parsed {
-		if i == 0 {
-			out[0].Blocks = p.Blocks
-			continue
+	sec := ir.Section{Heading: title}
+	for _, p := range parsed {
+		if p.Heading != "" {
+			sec.Blocks = append(sec.Blocks, ir.ProseBlock{
+				Text: "**" + p.Heading + "**",
+				Prov: ir.Provenance{SpecSection: "architecture-subhead", InputHash: hash},
+			})
 		}
-		out = append(out, p)
+		sec.Blocks = append(sec.Blocks, p.Blocks...)
 	}
-	if len(out[0].Blocks) == 0 && len(out) == 1 {
-		out[0].Blocks = []ir.Block{ir.ProseBlock{
+	if len(sec.Blocks) == 0 {
+		sec.Blocks = []ir.Block{ir.ProseBlock{
 			Text: "_No content was available for this section from the declared sources._",
 			Prov: ir.Provenance{SpecSection: "architecture-gap", InputHash: hash},
 		}}
 	}
-	return out
+	return []ir.Section{sec}
 }
 
 // resolveSources returns the grounding digest (kb areas + any
