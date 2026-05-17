@@ -1,23 +1,29 @@
-# Production image seed for the spec-chat agent-service.
+# Production image for the spec-chat agent-service + its browser SPA.
 #
-# FROM the proven pi env image (pi-sdk pattern/scaffold/Dockerfile =
-# spikes/07-stable-env): Node 22, @earendil-works/*@0.74.1 baked at
-# build, public registry — NEVER shell-`npm install` the SDK
-# (pi-sdk PATTERN §3 env rule). This service adds no npm deps of its
-# own (pure stdlib + the baked SDK), so there is nothing to install:
-# we only copy app code on top of the baked module tree.
-FROM pi-agent:0.74.1
+# Stage 1 builds the pi-web-ui SPA (vite7 needs Node >= 20.19; the
+# host is 20.18 — never build on host). Deps installed HERE at build
+# from the public registry (pi-sdk PATTERN §3 env rule: bake, never
+# shell-install at runtime).
+FROM node:22-bookworm-slim AS web
+WORKDIR /web
+RUN npm config set registry https://registry.npmjs.org
+COPY web/package.json ./
+RUN npm install --no-audit --no-fund
+COPY web/ ./
+RUN npm run build   # -> /web/dist (vite build; the spike-04 "build-verified" bar)
 
-# App lives under /pi so Node resolves @earendil-works/* from the
-# image's baked /pi/node_modules (resolution walks up from /pi/app).
+# Stage 2: the service, FROM the proven pi env image (Node 22 +
+# @earendil-works/*@0.74.1 baked). App under /pi so Node resolves the
+# baked /pi/node_modules.
+FROM pi-agent:0.74.1
 WORKDIR /pi/app
 COPY src ./src
 COPY package.json ./
-
+COPY --from=web /web/dist ./web/dist
+ENV WEB_ROOT=/pi/app/web/dist
 USER node
 ENV HOME=/home/node
-# Auth (~/.pi/agent Copilot OAuth) is bind-mounted at run, server-side
-# only (PATTERN §2). Bind localhost; the browser reaches this via the
-# slice-4 pi-web-ui, never with credentials.
+# Auth (~/.pi/agent Copilot OAuth) bind-mounted at run, server-side
+# only (PATTERN §2). SPA + API same-origin; no creds client-side.
 EXPOSE 4774
 CMD ["node", "src/server.mjs"]

@@ -119,6 +119,25 @@ NB: the standing prompt-eng-autonomy memory authorizes the
 *operator's* deliberate scoped batch re-verify — NOT an LLM looping
 Opus inside a user chat; this agent carries its own bound.
 
+**D7 — pi-web-ui integration shape.** RESOLVED 2026-05-17 (user):
+spike-04 (E4/KU4, live-Playwright) verified pi-web-ui's NATIVE path
+runs the agent-core `Agent` IN THE BROWSER with browser-side API-key
+auth (IndexedDB) — contradicts D1 (creds server-side). Chosen: **(a)
+pi-web-ui ChatPanel + a server-delegating transport shim** — the
+browser mounts ChatPanel over an `Agent` whose LLM transport
+delegates every turn to the server-side `/chat` (the real
+Agent+gate+OAuth+tools stay server-side; the browser holds no creds,
+the browser Agent is a UI-state shell). Honors PATTERN adopt-don't-
+build AND D1. Rejected: (b) presentational-only (drifts to building),
+(c) defer. v1 SCOPE NOTE: server runs tools, so the browser Agent
+emits no tool-exec events → pi-web-ui's rich tool-render is not wired
+in v1; conversation + a custom approval-confirm panel (drives
+`/approve`) is. SSE-bridging server tool events into pi-web-ui
+rendering is a v2 enhancement. Apply the verified GOTCHA: repoint
+`app.css` @import to `../node_modules/@earendil-works/pi-web-ui/dist/
+app.css`; build on node ≥20.19 (the pi image is node:22 — build
+there, never host).
+
 **D5 — v1 scope cut.** RESOLVED 2026-05-17 (user): single page;
 `read_kb_area` + `get/put_doc_spec` (incl. widen-sources) + gated
 `propose_kb_entry` + `preview_spec` + gated apply. v1 **does** close
