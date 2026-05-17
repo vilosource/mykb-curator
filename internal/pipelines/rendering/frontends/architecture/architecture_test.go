@@ -308,6 +308,55 @@ func TestRender_NoResolverForScheme_StaysPending(t *testing.T) {
 	}
 }
 
+func TestComposeSectionPrompt_EnforcesContractGroundingAndHonestGaps(t *testing.T) {
+	page := docspec.DocPage{Page: "Vault Architecture", Intent: "Understand Vault."}
+	sec := docspec.DocSection{Title: "System Architecture", Intent: "3-node Raft + auto-unseal; include a diagram."}
+	p := composeSectionPrompt(page, sec, "### Area: vault\n- [fact/f1] 5-node Raft cluster\n", nil)
+
+	// Page/section framing + the grounding digest must survive intact.
+	for _, want := range []string{
+		"Vault Architecture",        // page
+		"Understand Vault.",         // page intent
+		"System Architecture",       // section title
+		"3-node Raft + auto-unseal", // section intent, verbatim
+		"5-node Raft cluster",       // kb digest preserved
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt missing %q:\n%s", want, p)
+		}
+	}
+	low := strings.ToLower(p)
+	// 1. The intent is a must-cover-EVERY-item contract, not a soft "convey";
+	//    preamble-only / generic-overview output is explicitly forbidden.
+	if !strings.Contains(low, "every") ||
+		(!strings.Contains(low, "checklist") && !strings.Contains(low, "contract")) {
+		t.Errorf("prompt must frame the intent as a cover-every-item contract:\n%s", p)
+	}
+	if !strings.Contains(low, "preamble") {
+		t.Errorf("prompt must forbid stopping at a preamble:\n%s", p)
+	}
+	// 2. Substance must be the supplied org-specifics, not generic filler.
+	if !strings.Contains(low, "generic") && !strings.Contains(low, "textbook") {
+		t.Errorf("prompt must forbid generic filler in place of org specifics:\n%s", p)
+	}
+	// 3. An unsupported required item is flagged explicitly — not omitted
+	//    (silent intent FAIL) and not fabricated (ungrounded FAIL).
+	if !strings.Contains(p, "_Not covered by current sources:") {
+		t.Errorf("prompt must instruct an explicit per-item gap note:\n%s", p)
+	}
+}
+
+func TestPersonaBase_CarriesFullContractRule(t *testing.T) {
+	low := strings.ToLower(persona(""))
+	if !strings.Contains(low, "contract") {
+		t.Errorf("persona base must carry the deliver-the-full-contract rule: %q", persona(""))
+	}
+	// The audience lever must still be appended on top of the new rule.
+	if !strings.Contains(low, "operating this system") {
+		t.Errorf("human-operator audience suffix lost: %q", persona(""))
+	}
+}
+
 func TestPersona_AudienceLever(t *testing.T) {
 	if !strings.Contains(persona("newcomer"), "ZERO prior knowledge") {
 		t.Error("newcomer persona missing")

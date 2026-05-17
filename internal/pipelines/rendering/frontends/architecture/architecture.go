@@ -311,12 +311,16 @@ func composeSectionPrompt(page docspec.DocPage, sec docspec.DocSection, kbDigest
 	fmt.Fprintf(&sb, "Page: %s\nPage intent: %s\n\n", page.Page, page.Intent)
 	fmt.Fprintf(&sb, "Write ONLY the prose body for the section titled %q.\n", sec.Title)
 	if sec.Intent != "" {
-		fmt.Fprintf(&sb, "This section must convey: %s\n", sec.Intent)
+		fmt.Fprintf(&sb, "Section contract (you MUST satisfy every item it calls for): %s\n", sec.Intent)
 	}
+	sb.WriteString("\nRequirements — all mandatory:\n")
+	sb.WriteString("- Treat the contract as an explicit checklist. Deliver every distinct item it calls for: when it asks for a procedure, enumerate the concrete steps or phases; when it asks for a model or list, lay it out in full. Do not stop at a preamble or a generic overview.\n")
+	sb.WriteString("- The substance MUST be the organisation-specific specifics in the supplied knowledge base content (versions, topology, hosts, decisions, procedures). Surface them; never substitute generic, textbook description of the technology for the organisation's own details.\n")
+	sb.WriteString("- If and only if the supplied sources do not support a required contract item, state that explicitly and briefly for that item as `_Not covered by current sources: <item>._` Never omit a required item silently and never invent organisation specifics to fill it.\n\n")
 	sb.WriteString("Do NOT output the section heading. Do NOT use # or ## headings. ")
 	sb.WriteString("Use ### sparingly only for genuine sub-points. You MAY include one mermaid fenced block if it aids understanding.\n\n")
 	if strings.TrimSpace(kbDigest) != "" {
-		sb.WriteString("Ground every organisation-specific claim in the following knowledge base content. Do not invent organisation specifics.\n\n")
+		sb.WriteString("Ground every organisation-specific claim ONLY in the following knowledge base content. Do not invent organisation specifics.\n\n")
 		sb.WriteString(kbDigest)
 	} else {
 		sb.WriteString("(No kb content resolved for this section's sources.)\n")
@@ -333,6 +337,7 @@ Rules:
 - Markdown only. No preamble, no postscript, no wrapping code fence.
 - No # or ## headings (the page/section headings are set for you).
 - Ground every organisation-specific claim (versions, hosts, topology, decisions) ONLY in the supplied kb content. Do not invent organisation specifics.
+- Deliver the section's full declared contract: every item it calls for, built from the supplied sources' specifics. Generic technology background never substitutes for the organisation's own details, and a required item the sources cannot support must be flagged explicitly — never silently dropped or invented.
 - Mermaid (if used): one statement per line; diagram type on its own first line; no parentheses/slashes/colons/backticks inside node labels; quote subgraph titles; keep it small.`
 
 func persona(audience string) string {
