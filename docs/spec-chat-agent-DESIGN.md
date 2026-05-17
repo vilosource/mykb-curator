@@ -1,7 +1,17 @@
 # DESIGN — spec-chat agent-service (Track A)
 
-> Status: **APPROVED 2026-05-17 — all open decisions D1–D6 resolved
-> (§5). Proceeding to TDD build (PROCESS §0).**
+> Status: **SHIPPED 2026-05-17 — D1–D7 resolved; slices 1–5 on
+> `main`, full four-level pyramid green.** Slice 1 docedit
+> (fidelity .doc.yaml editor); slice 2 curator-api + specchat +
+> `serve`; slice 3 Node agent-service (5 tools + composed gate);
+> slice 4 pi-web-ui browser surface (D7a); slice 5 the GRS-gap
+> capstone scenario (Judge verdict FLIPS fail→pass through the real
+> pipeline once the widen-sources remedy grounds the claim).
+> **Honest residual:** pi-web-ui full `ChatPanel.setAgent` rich
+> tool/streaming render is build-verified ONLY — the live-UX
+> Playwright smoke (the method spike-04 used) is the one carried
+> follow-up; v1 ships a conservative pi-web-ui-styled transcript +
+> the D2/D6 approval panel over the (tested) RemoteAgent transport.
 > Foundations: `github.com/vilosource/pi-sdk` `pattern/PATTERN.md`
 > (the agentic-workflow pattern) + mykb-curator internal packages
 > (verified surface map, 2026-05-17).
