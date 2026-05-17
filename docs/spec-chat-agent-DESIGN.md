@@ -195,3 +195,31 @@ docker run --rm -v "$PWD/scripts:/pi/app/scripts:ro" \
 # required" panel appears -> Approve & apply -> auto re-prompt ->
 # "Applied". Verified live 2026-05-17 (status header).
 ```
+
+## 7. D8 — approve→apply loop bug (live-found 2026-05-17) + fix
+
+**Found by first-light live testing** (gitlab-runners gap), NOT by the
+28 faux tests. Three of our own decisions contradicted:
+
+1. session-per-request (`SessionManager.inMemory()` + `dispose()` each
+   `/chat`, PATTERN E2) ⇒ turn 2 has zero memory of turn 1;
+2. the approve→re-apply flow required the LLM to **re-issue the
+   identical tool call from memory it does not have** ⇒ the real model
+   hallucinated different args (`area:pi-skills-kb`, `type:decision`);
+3. the gate keyed approval on exact `name+JSON.stringify(args)` ⇒ even
+   a faithful re-issue would miss on serialization drift.
+
+The faux tests missed it because `agent.faux`/`server.faux` scripted
+the **same `fauxToolCall` args on both turns** — a stub validating its
+own assumption (`feedback_external_contract_grounding`).
+
+**Safety held**: the gate blocked every unapproved/mismatched
+mutation; the real `~/.mykb` was never touched. Only *liveness* of the
+apply loop was broken.
+
+**Fix (architectural):** `/approve {id}` applies the **held proposal
+deterministically server-side** via the curator client, from the
+args captured in `pending` — never a second stateless LLM turn. The
+gate's job is block + surface (with a stable `id`); apply-on-approval
+is a server action on captured args. The brittle exact-args approvals
+set is removed entirely. Re-verified live after the fix.
