@@ -35,8 +35,14 @@ func TestShellKBWriter_AddEntry(t *testing.T) {
 	}
 	got, _ := os.ReadFile(argLog)
 	argv := strings.Split(strings.TrimSpace(string(got)), "\n")
+	// Agent/curator-proposed entries are quarantined into kb's
+	// 'incoming' zone (mykb#30) — never straight into active. The
+	// --zone incoming arg is the contract, asserted on the real argv
+	// (not a self-scripted stub) so curatorapi's reported zone can't
+	// drift from what is actually written (mykb-curator#2).
 	want := []string{"add", "fact", "vault", "daily Raft snapshot -> GRS",
-		"--source", "hashicorp-vault runbook", "--why", "closes Judge gap"}
+		"--source", "hashicorp-vault runbook", "--zone", "incoming",
+		"--why", "closes Judge gap"}
 	if strings.Join(argv, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("argv = %v\nwant  %v", argv, want)
 	}

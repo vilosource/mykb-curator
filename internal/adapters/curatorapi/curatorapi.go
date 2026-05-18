@@ -446,6 +446,11 @@ func (s *Server) handleProposeEntry(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadGateway, "kb add: "+err.Error())
 		return
 	}
+	// Zone is reported as "incoming" because the KBWriter contract
+	// quarantines every proposed entry there — enforced by ShellKBWriter
+	// passing `--zone incoming` and asserted on the real argv in
+	// shellkbwriter_test (so this is no longer a hardcoded claim that
+	// can drift from what is actually written — mykb-curator#2).
 	writeJSON(w, http.StatusOK, proposeEntryResp{EntryID: id, Area: req.Area, Zone: "incoming"})
 }
 

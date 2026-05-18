@@ -98,7 +98,7 @@ type Entry struct {
 	Type       string // "fact" | "decision" | "gotcha" | "pattern" | "link"
 	Text       string
 	Tags       []string
-	Zone       string // "incoming" | "active" | "established" | "archived"
+	Zone       string // "incoming" | "active" | "established" | "archive" (kb's real CHECK)
 	Created    string // RFC3339; kept as string to avoid timezone surprises
 	Updated    string
 	Provenance EntryProvenance

@@ -116,7 +116,13 @@ func (s *ShellKBWriter) AddEntry(ctx context.Context, area, typ, text, source, w
 	if bin == "" {
 		bin = "kb"
 	}
-	args := []string{"add", typ, area, text, "--source", source}
+	// Agent/curator-proposed entries are quarantined into kb's
+	// 'incoming' zone (mykb#30 added it; CHECK enforces it). They
+	// never land straight in 'active' — a human releases them with
+	// `kb verify` (which moves incoming->active). This is the
+	// design-D6 verification-first guarantee, now real instead of a
+	// fictional zone (mykb-curator#2 / kb gotcha vwpvk7lQ).
+	args := []string{"add", typ, area, text, "--source", source, "--zone", "incoming"}
 	if why != "" {
 		args = append(args, "--why", why)
 	}
@@ -151,7 +157,13 @@ func parseEntryID(out string) string {
 
 func isIDish(s string) bool {
 	for _, r := range s {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9',
+			r == '-', r == '_':
+			// allowed id character
+		default:
 			return false
 		}
 	}

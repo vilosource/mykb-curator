@@ -102,7 +102,7 @@ func TestRun_ArchivedEntries_Skipped(t *testing.T) {
 	snap := kb.Snapshot{Areas: []kb.Area{{
 		ID: "vault",
 		Entries: []kb.Entry{
-			{ID: "archived", Area: "vault", Type: "fact", Updated: rfc(stale), Zone: "archived"},
+			{ID: "archived", Area: "vault", Type: "fact", Updated: rfc(stale), Zone: "archive"},
 		},
 	}}}
 	got, _ := New(30*24*time.Hour).Run(context.Background(), snap)

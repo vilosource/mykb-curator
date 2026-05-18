@@ -11,7 +11,7 @@
 //	include:
 //	  areas: [a, b, c]
 //	  workspaces: [d, e]
-//	  exclude_zones: [incoming, archived]
+//	  exclude_zones: [incoming, archive]
 //	fact_check:
 //	  link_rot: every-run
 //	  external_truth: quarterly

@@ -56,7 +56,7 @@ version: 1
 include:
   areas: [networking, vault, harbor]
   workspaces: [dr, hetzner]
-  exclude_zones: [incoming, archived]
+  exclude_zones: [incoming, archive]
 fact_check:
   link_rot: every-run
   external_truth: quarterly
@@ -72,7 +72,7 @@ Cover all the Azure infrastructure topics.
 	if got := spec.Include.Workspaces; !reflect.DeepEqual(got, []string{"dr", "hetzner"}) {
 		t.Errorf("Workspaces = %v", got)
 	}
-	if got := spec.Include.ExcludeZones; !reflect.DeepEqual(got, []string{"incoming", "archived"}) {
+	if got := spec.Include.ExcludeZones; !reflect.DeepEqual(got, []string{"incoming", "archive"}) {
 		t.Errorf("ExcludeZones = %v", got)
 	}
 	wantFC := map[string]string{"link_rot": "every-run", "external_truth": "quarterly"}

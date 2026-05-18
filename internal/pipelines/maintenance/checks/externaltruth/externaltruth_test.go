@@ -146,7 +146,7 @@ func TestOnlyFactsChecked_ArchivedSkipped(t *testing.T) {
 
 	s := kb.Snapshot{Areas: []kb.Area{{ID: "vault", Entries: []kb.Entry{
 		{ID: "d1", Type: "decision", Text: "a decision", Zone: "active"},
-		{ID: "f-arch", Type: "fact", Text: "old", Zone: "archived"},
+		{ID: "f-arch", Type: "fact", Text: "old", Zone: "archive"},
 		fact("f-ok", "live claim"),
 	}}}}
 	props, err := c.Run(context.Background(), s)

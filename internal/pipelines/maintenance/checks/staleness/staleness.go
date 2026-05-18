@@ -4,7 +4,7 @@
 //
 // Skips:
 //   - entries already verified (different concern: re-verification)
-//   - entries in zone=archived (already out of circulation)
+//   - entries in zone=archive (already out of circulation)
 //   - entries with no Updated timestamp (no decision possible)
 //
 // Threshold is per-check; per-area thresholds are a future extension
@@ -35,7 +35,7 @@ func New(threshold time.Duration) *Check {
 func (*Check) Name() string { return "staleness" }
 
 // Run scans the snapshot and proposes deprecation for each stale
-// non-verified non-archived entry.
+// non-verified non-archive entry.
 func (c *Check) Run(_ context.Context, snap kb.Snapshot) ([]maintenance.MutationProposal, error) {
 	cutoff := c.now().Add(-c.threshold)
 	var out []maintenance.MutationProposal
@@ -72,7 +72,7 @@ func (c *Check) shouldFlag(e kb.Entry) bool {
 	if e.Updated == "" {
 		return false
 	}
-	if e.Zone == "archived" {
+	if e.Zone == "archive" {
 		return false
 	}
 	if e.Provenance.Status == "verified" {

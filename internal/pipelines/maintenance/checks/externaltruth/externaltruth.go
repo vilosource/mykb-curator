@@ -75,7 +75,7 @@ func (c *Check) Run(ctx context.Context, snap kb.Snapshot) ([]maintenance.Mutati
 			continue // not funded for this area
 		}
 		for _, e := range area.Entries {
-			if e.Type != "fact" || e.Zone == "archived" {
+			if e.Type != "fact" || e.Zone == "archive" {
 				continue
 			}
 			p, ok, err := c.checkFact(ctx, area.ID, e)
