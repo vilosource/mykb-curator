@@ -18,7 +18,7 @@ import "./app.css";
 import { RemoteAgent } from "./remoteAgent.mjs";
 
 type Msg = { role: "user" | "assistant"; text: string };
-type Proposal = { name: string; args: unknown };
+type Proposal = { id: string; name: string; args: unknown };
 
 const agent = new RemoteAgent(""); // same-origin: served by the agent-service
 const transcript: Msg[] = [];
@@ -98,11 +98,19 @@ async function sendTurn(prompt: string) {
 }
 
 async function approve(p: Proposal) {
-  await agent.approve(p);
+  // D8: the server applies the held proposal deterministically from
+  // its captured args — no re-prompt / second LLM turn.
+  try {
+    const r: any = await agent.approve(p);
+    transcript.push({
+      role: "assistant",
+      text: `✓ Applied ${p.name} — ${JSON.stringify(r.result ?? r)}`,
+    });
+  } catch (e) {
+    transcript.push({ role: "assistant", text: `⚠ apply failed: ${(e as Error).message}` });
+  }
   pending = pending.filter((x) => x !== p);
   view();
-  // Re-prompt so the now-approved mutation is applied in the next turn.
-  await sendTurn("Apply the approved change now.");
 }
 
 view();

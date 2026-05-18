@@ -25,14 +25,14 @@ before(async () => {
         if (/widen/.test(body.prompt))
           return send(200, {
             text: "I need approval to apply this diff.",
-            pendingApprovals: [{ name: "put_doc_spec", args: { id: "vault.doc.yaml" } }],
+            pendingApprovals: [{ id: "p1", name: "put_doc_spec", args: { id: "vault.doc.yaml" } }],
             ok: true, sessionCostUSD: 0, sessionPreviewCount: 0,
           });
         return send(200, { text: "Here is the vault area.", pendingApprovals: [], ok: true });
       }
       if (req.url === "/approve") {
         approved.push(body);
-        return send(200, { approved: body.name });
+        return send(200, { applied: "put_doc_spec", id: body.id, result: { diff: "+x" } });
       }
       send(404, { error: "no route" });
     });
@@ -49,21 +49,21 @@ test("send delegates a turn to /chat and returns text", async () => {
   assert.deepEqual(r.pendingApprovals, []);
 });
 
-test("pending mutation surfaced; approve() round-trips to /approve", async () => {
+test("pending mutation surfaced; approve() posts only the id (D8)", async () => {
   const a = new RemoteAgent(base);
   const r = await a.send("widen sources and save");
   assert.equal(r.pendingApprovals.length, 1);
-  assert.equal(a.pending[0].name, "put_doc_spec");
+  assert.equal(a.pending[0].id, "p1");
 
-  await a.approve(r.pendingApprovals[0]);
+  const res = await a.approve(r.pendingApprovals[0]);
   assert.equal(approved.length, 1);
-  assert.equal(approved[0].name, "put_doc_spec");
-  assert.deepEqual(approved[0].args, { id: "vault.doc.yaml" });
+  assert.deepEqual(approved[0], { id: "p1" }, "approve sends ONLY the id; server applies from captured args");
+  assert.equal(res.applied, "put_doc_spec");
 });
 
-test("approve requires a named proposal", async () => {
+test("approve requires a proposal id", async () => {
   const a = new RemoteAgent(base);
-  await assert.rejects(() => a.approve({}), /name required/);
+  await assert.rejects(() => a.approve({}), /id required/);
 });
 
 test("server error surfaced (faithful)", async () => {

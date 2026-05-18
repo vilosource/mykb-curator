@@ -2,16 +2,17 @@
 // talks here; this owns the pi Agent + OAuth + gate; NO credentials
 // client-side (pi-sdk PATTERN §2). Endpoints:
 //
-//   POST /chat    {prompt}            -> runTurn result (incl.
-//                                        pendingApprovals for the UI)
-//   POST /approve  {name, args}       -> records an out-of-band human
-//                                        ACK so the gate lets that
-//                                        exact mutation through next
-//                                        call (design D2/D6 HITL)
+//   POST /chat    {prompt}        -> runTurn result (incl.
+//                                    pendingApprovals[{id,name,args}])
+//   POST /approve {id}            -> APPLIES the held proposal
+//                                    server-side from its captured
+//                                    args, deterministically — no
+//                                    second LLM turn (D2/D6/D8 HITL)
 //   GET  /healthz
 //
-// The approvals store is the confirm channel the gate consumes: the
-// model cannot write to it — only an explicit human /approve can.
+// The held-proposal list is the confirm channel: the model can only
+// propose (and is always blocked); an explicit human /approve {id}
+// is what actually applies it, via the same curator client.
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { join, resolve, relative, isAbsolute, extname } from "node:path";
@@ -57,18 +58,16 @@ async function serveStatic(webRoot, urlPath, res) {
   res.writeHead(404).end("not found");
 }
 
-export function makeApprovals() {
-  const set = new Set();
-  const key = (name, args) => name + "::" + JSON.stringify(args ?? {});
-  return {
-    approve: (name, args) => set.add(key(name, args)),
-    isApproved: (name, args) => set.has(key(name, args)),
-    _size: () => set.size,
-  };
+// applyProposal applies a held mutation deterministically from its
+// CAPTURED args (D8) — never a second LLM turn. The agent exposes its
+// curator client so this is the exact same transport the tool used.
+async function applyProposal(client, p) {
+  if (p.name === "propose_kb_entry") return client.proposeKbEntry(p.args);
+  if (p.name === "put_doc_spec") return client.putDocSpec(p.args.id, p.args.edits);
+  throw new Error(`unknown pending proposal '${p.name}'`);
 }
 
 export function createApp(deps = {}) {
-  const approvals = deps.approvals || makeApprovals();
   const webRoot = deps.webRoot || process.env.WEB_ROOT || null;
 
   // The Agent needs server-side OAuth (~/.pi/agent). Build it LAZILY
@@ -76,8 +75,14 @@ export function createApp(deps = {}) {
   // unauth deployment then fails only /chat, cleanly (502), instead
   // of crashing the whole service at startup.
   let agent = deps.agent || null;
+  // A chat session counts as "started" once the first /chat is
+  // handled. 409-vs-404 keys off THIS, not off `agent` being null:
+  // tests legitimately inject deps.agent eagerly, so agent identity
+  // is not a faithful "no session yet" signal (the D8 lesson — never
+  // let a harness-injected object decide a contract branch).
+  let started = false;
   const getAgent = () => {
-    if (!agent) agent = createAgent({ approvals, ...deps.agentDeps });
+    if (!agent) agent = createAgent({ ...deps.agentDeps });
     return agent;
   };
 
@@ -105,12 +110,22 @@ export function createApp(deps = {}) {
     }
 
     if (req.url === "/approve") {
-      if (!payload.name) return send(400, { error: "name required" });
-      approvals.approve(payload.name, payload.args);
-      return send(200, { approved: payload.name });
+      // D8: apply the held proposal server-side from captured args.
+      if (!payload.id) return send(400, { error: "id required" });
+      if (!started || !agent)
+        return send(409, { error: "no chat session yet — nothing to approve" });
+      const p = agent.takePending(payload.id);
+      if (!p) return send(404, { error: `no pending proposal '${payload.id}'` });
+      try {
+        const result = await applyProposal(agent.client, p);
+        return send(200, { applied: p.name, id: p.id, result });
+      } catch (e) {
+        return send(502, { error: String(e?.message || e), id: p.id });
+      }
     }
     if (req.url === "/chat") {
       if (!payload.prompt) return send(400, { error: "prompt required" });
+      started = true;
       try {
         const result = await getAgent().runTurn(payload.prompt);
         return send(200, result);
@@ -129,7 +144,7 @@ export function createApp(deps = {}) {
       res.end(JSON.stringify({ error: String(e?.message || e) }));
     });
   });
-  return { server, approvals, getAgent };
+  return { server, getAgent };
 }
 
 // Entrypoint (the Docker CMD).

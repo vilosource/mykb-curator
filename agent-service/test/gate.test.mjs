@@ -19,30 +19,34 @@ test("unknown tool is default-denied (sandbox)", async () => {
   assert.equal(r?.block, true);
 });
 
-test("mutation tools blocked without explicit approval (D2/D6)", async () => {
+test("mutation tools are ALWAYS blocked + recorded with a stable id (D2/D6/D8)", async () => {
   const { gate, state } = makeGate({});
   const r = await gate(ctx("put_doc_spec", { id: "x", edits: [{ op: "add_section_source" }] }));
   assert.equal(r?.block, true);
-  assert.match(r.reason, /human|approv|HITL/i);
-  // the pending proposal is recorded for the UI to confirm
+  assert.match(r.reason, /HITL|approve|pending/i);
   assert.equal(state.pending.length, 1);
   assert.equal(state.pending[0].name, "put_doc_spec");
+  assert.ok(state.pending[0].id, "pending proposal must carry a stable id");
 
   const r2 = await gate(ctx("propose_kb_entry", { area: "vault", type: "fact" }));
   assert.equal(r2?.block, true);
+  // D8: there is NO agent-side approved path — a mutation is blocked
+  // every time, no matter what; ids are unique per proposal.
+  assert.equal(state.pending.length, 2);
+  assert.notEqual(state.pending[0].id, state.pending[1].id);
 });
 
-test("mutation tool allowed once the approval channel approves it", async () => {
-  const approved = new Set();
-  const approvals = {
-    isApproved: (name, args) => approved.has(name + JSON.stringify(args)),
-  };
-  const { gate } = makeGate({ approvals });
-  const args = { area: "vault", type: "fact", text: "t", source: "s" };
+test("takePending removes + returns a held proposal by id (server applies it; D8)", async () => {
+  const { gate, takePending, state } = makeGate({});
+  await gate(ctx("propose_kb_entry", { area: "vault", type: "fact", text: "t", source: "s" }));
+  const id = state.pending[0].id;
 
-  assert.equal((await gate(ctx("propose_kb_entry", args)))?.block, true);
-  approved.add("propose_kb_entry" + JSON.stringify(args)); // human ACKs out-of-band
-  assert.equal(await gate(ctx("propose_kb_entry", args)), undefined);
+  const taken = takePending(id);
+  assert.equal(taken.name, "propose_kb_entry");
+  assert.equal(taken.args.area, "vault");
+  assert.equal(state.pending.length, 0, "taken proposal is removed");
+  assert.equal(takePending(id), undefined, "second take is a no-op");
+  assert.equal(takePending("nope"), undefined);
 });
 
 test("D4: only one preview per turn", async () => {

@@ -72,25 +72,17 @@ test("scripted put_doc_spec: gate BLOCKS (no approval), tool never runs", async 
     fauxAssistantMessage([fauxText("I need your approval to apply that edit.")]),
   ]);
   const r = await agent.runTurn("widen the sources and save");
-  assert.ok(!hits.slice(before).includes("/v1/doc-spec/put"), "mutation must NOT reach curator-api without approval");
+  assert.ok(!hits.slice(before).includes("/v1/doc-spec/put"), "mutation must NOT reach curator-api via the LLM");
   assert.equal(r.pendingApprovals.length, 1);
   assert.equal(r.pendingApprovals[0].name, "put_doc_spec");
+  assert.ok(r.pendingApprovals[0].id, "surfaced proposal carries a stable id (D8)");
   reg.unregister();
 });
 
-test("approved mutation flows through to curator-api", async () => {
-  const before = hits.length;
-  const approvals = { isApproved: (name) => name === "put_doc_spec" };
-  const { reg, agent } = fauxHarness({ approvals });
-  reg.setResponses([
-    fauxAssistantMessage(
-      [fauxToolCall("put_doc_spec", { id: "vault.doc.yaml", edits: [{ op: "add_section_source", ref: "parent", section: "Deployment & Operations", source: "kb:area=disaster-recovery" }] })],
-      { stopReason: "toolUse" }
-    ),
-    fauxAssistantMessage([fauxText("Applied.")]),
-  ]);
-  const r = await agent.runTurn("apply the approved edit");
-  assert.ok(hits.slice(before).includes("/v1/doc-spec/put"), "approved mutation should reach curator-api");
-  assert.deepEqual(r.toolErrors, []);
-  reg.unregister();
-});
+// D8: there is intentionally NO "approved mutation flows through the
+// agent" test — mutations are NEVER applied via the LLM. The apply
+// path is server-side from captured args (server.faux.test.mjs:
+// "blocked -> /approve {id} -> server applies"). The old test here
+// scripted identical fauxToolCall args on a second turn — a stub
+// validating its own assumption; live testing proved a real
+// stateless LLM cannot reproduce them.

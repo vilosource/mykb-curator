@@ -2,11 +2,12 @@
 //
 // Encodes two design decisions:
 //   D2/D6 — put_doc_spec and propose_kb_entry mutate the spec/brain.
-//           They are HARD HITL: blocked until an out-of-band human
-//           approval (the slice-4 web UI's confirm channel) approves
-//           THIS exact call. The agent cannot forge approval — it
-//           flows through the injected `approvals` provider, not the
-//           model.
+//           They are HARD HITL and are NEVER applied through the LLM:
+//           the gate ALWAYS blocks them, records the proposal with a
+//           stable id, and the human applies it out-of-band via
+//           server-side /approve {id} (D8 fix — apply is a
+//           deterministic server action on the captured args, not a
+//           second stateless LLM turn that must re-issue them).
 //   D4    — preview_spec runs the paid Opus render+Judge. Bounded:
 //           at most one preview per user turn, and a per-session
 //           ceiling (default 10, configurable). Cost is accumulated
@@ -18,24 +19,28 @@
 const READ_TOOLS = new Set(["read_kb_area", "get_doc_spec"]);
 const MUTATION_TOOLS = new Set(["put_doc_spec", "propose_kb_entry"]);
 
-// makeGate({ approvals?, perSessionCeiling? }) -> { gate, beginTurn,
-// recordCost, state }. `gate` is the async beforeToolCall.
-export function makeGate({ approvals, perSessionCeiling = 10 } = {}) {
+// makeGate({ perSessionCeiling? }) -> { gate, beginTurn, recordCost,
+// takePending, state }. `gate` is the async beforeToolCall.
+export function makeGate({ perSessionCeiling = 10 } = {}) {
   const state = {
     turnPreviewCount: 0,
     sessionPreviewCount: 0,
     sessionCostUSD: 0,
-    pending: [], // proposed mutations awaiting human ACK (for the UI)
+    seq: 0,
+    pending: [], // proposed mutations awaiting human ACK (id'd, for /approve)
     ceiling: perSessionCeiling,
   };
 
-  const isApproved =
-    approvals && typeof approvals.isApproved === "function"
-      ? (n, a) => approvals.isApproved(n, a)
-      : () => false;
-
   function beginTurn() {
     state.turnPreviewCount = 0;
+  }
+
+  // Remove + return a held proposal by id (the server applies it
+  // deterministically on /approve; D8). Returns undefined if absent.
+  function takePending(id) {
+    const i = state.pending.findIndex((p) => p.id === id);
+    if (i < 0) return undefined;
+    return state.pending.splice(i, 1)[0];
   }
 
   function recordCost(usd) {
@@ -49,15 +54,19 @@ export function makeGate({ approvals, perSessionCeiling = 10 } = {}) {
     if (READ_TOOLS.has(name)) return undefined;
 
     if (MUTATION_TOOLS.has(name)) {
-      if (isApproved(name, args)) return undefined;
-      state.pending.push({ name, args, at: Date.now() });
+      // ALWAYS blocked at the agent layer — mutations are never
+      // applied via the LLM. Record with a stable id; the human
+      // applies it via server-side /approve {id} (D8).
+      const id = `p${++state.seq}`;
+      state.pending.push({ id, name, args, at: Date.now() });
       return {
         block: true,
         reason:
-          `HITL (design D2/D6): '${name}' mutates the ` +
+          `HITL (design D2/D6/D8): '${name}' mutates the ` +
           `${name === "propose_kb_entry" ? "knowledge brain" : "doc-spec"}. ` +
-          `Surface the proposed change (the diff) to the human and obtain ` +
-          `explicit approval through the confirm channel before applying.`,
+          `Recorded as pending proposal '${id}'. Surface the proposed ` +
+          `change (the diff) to the human; it is applied out-of-band ` +
+          `via /approve once they confirm — never re-issued by you.`,
       };
     }
 
@@ -90,5 +99,5 @@ export function makeGate({ approvals, perSessionCeiling = 10 } = {}) {
     };
   }
 
-  return { gate, beginTurn, recordCost, state };
+  return { gate, beginTurn, recordCost, takePending, state };
 }

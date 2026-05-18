@@ -29,8 +29,7 @@ export function createAgent(deps = {}) {
   const authStorage = deps.authStorage || AuthStorage.create();
   const registry = deps.modelRegistry || ModelRegistry.create(authStorage);
   const client = deps.client || new CuratorClient();
-  const { gate, beginTurn, recordCost, state } = makeGate({
-    approvals: deps.approvals,
+  const { gate, beginTurn, recordCost, takePending, state } = makeGate({
     perSessionCeiling: deps.perSessionCeiling,
   });
   const tools = makeTools(client);
@@ -88,5 +87,7 @@ export function createAgent(deps = {}) {
     return result;
   }
 
-  return { runTurn, state, gate };
+  // takePending + client exposed so the server applies an approved
+  // proposal deterministically from captured args (D8).
+  return { runTurn, state, gate, takePending, client };
 }

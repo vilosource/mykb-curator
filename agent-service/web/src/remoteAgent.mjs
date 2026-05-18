@@ -5,8 +5,9 @@
 // independent of pi-web-ui. main.ts binds this to the ChatPanel.
 //
 // Speaks the slice-3 boundary contract:
-//   POST /chat    {prompt} -> { text, pendingApprovals[], ... }
-//   POST /approve {name,args} -> { approved }
+//   POST /chat    {prompt} -> { text, pendingApprovals[{id,...}], ... }
+//   POST /approve {id}      -> { applied, id, result }  (D8: the
+//                              server applies it; no re-prompt)
 
 export class RemoteAgent {
   constructor(baseURL = "") {
@@ -48,9 +49,11 @@ export class RemoteAgent {
 
   // The human confirms a held mutation through the out-of-band
   // channel the model cannot forge.
+  // D8: approve by stable id; the server applies it deterministically
+  // from the captured args. No re-prompt, no second LLM turn.
   async approve(proposal) {
-    if (!proposal || !proposal.name) throw new Error("approve: proposal.name required");
-    return this.#post("/approve", { name: proposal.name, args: proposal.args });
+    if (!proposal || !proposal.id) throw new Error("approve: proposal.id required");
+    return this.#post("/approve", { id: proposal.id });
   }
 
   get pending() {
