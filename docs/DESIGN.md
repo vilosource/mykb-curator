@@ -535,7 +535,7 @@ version: 1                        # spec schema version
 include:                          # explicit kb scope (defense in depth)
   areas: [networking, vault, harbor, ...]
   workspaces: [dr, hetzner]
-  exclude_zones: [incoming, archived]
+  exclude_zones: [incoming, archive]
 fact_check:                       # opt-in expensive checks
   link_rot: every-run
   external_truth: quarterly

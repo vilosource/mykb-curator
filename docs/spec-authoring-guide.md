@@ -17,7 +17,7 @@ version: 1
 include:
   areas: [networking, vault, harbor]
   workspaces: [dr, hetzner]
-  exclude_zones: [incoming, archived]
+  exclude_zones: [incoming, archive]
 fact_check:
   external_truth: quarterly
 protected_blocks: [executive-summary]
@@ -41,7 +41,7 @@ These are the fields the parser actually reads
 | `version` | — | Spec schema version (integer). |
 | `include.areas` | — | kb area IDs this spec may read. Defense-in-depth scope. |
 | `include.workspaces` | — | Workspace IDs, or the sentinel string `linked-to-areas`. Accepts a scalar or a list. |
-| `include.exclude_zones` | — | kb zones to drop (e.g. `incoming`, `archived`). |
+| `include.exclude_zones` | — | kb zones to drop. kb's real zones are `incoming`, `active`, `established`, `archive` — typically drop `incoming` (unverified, agent-proposed) and `archive` (out of circulation). |
 | `fact_check` | — | Opt-in map of `check: cadence`. See below. |
 | `protected_blocks` | — | Block IDs the reconciler must never overwrite. |
 
