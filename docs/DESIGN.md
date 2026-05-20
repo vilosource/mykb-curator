@@ -465,6 +465,70 @@ record new revision id + per-block provenance in cache
 
 **Per-spec override**: A spec can declare specific blocks as `protected: true` — in which case the reconciler never overwrites them, only surfaces "block has drifted from kb" warnings. Belongs in the spec (visible in review) rather than as inline magic markers (silent).
 
+### 5.7 The closed Judge loop (output refinement)
+
+The `Judge` (`internal/judge`) reviews each rendered page section against
+its spec-declared intent and flags organisation-specific claims not
+traceable to the kb grounding the synthesis was given. Originally it was
+**report-only**: the orchestrator surfaced a failing verdict as a run-report
+warning and pushed the page anyway. The closed loop promotes it from
+*"is it good?"* (advisory) to *"make it good"* (acted-on) — generalising the
+`renderdiagrams` `Repairer` (a deterministic `mmdc` judge → LLM fix →
+re-render) from "does it parse" to "is it good".
+
+```
+synthesize ──► passes ──► judge
+                            │
+                 AllPass? ──┴── no, budget left, progress being made
+                  │                         │
+                  ▼                         ▼
+               publish        re-synthesize FAILING sections
+                              (verdict injected as feedback)
+                                            │
+                                  ◄─────────┘  (passes ──► judge ──► loop)
+```
+
+**Where it lives (D1).** A dedicated `internal/pipelines/rendering/refine`
+package owns the bounded loop, handed a synth-step + the pass pipeline + the
+Judge. The orchestrator calls it in place of the old inline synth+judge
+block, so the loop stays thin-caller and is unit-testable in isolation with a
+faux frontend + faux Judge (the same isolation `renderdiagrams` gives its
+repair loop). Because the Judge reviews the *post-pass* doc, each iteration
+re-runs the passes before re-judging.
+
+**How the verdict drives the next attempt (D2).** Failure is data, not a
+patch target. The loop re-**synthesizes** only the failing sections via an
+additive `RenderWithFeedback` on the architecture frontend (the
+`frontends.Frontend` interface is untouched; base `Render` = nil feedback):
+the section's `reason` + `ungrounded_claims` are appended to its synthesis
+prompt **and `resolveSources` is re-run**, so the model sees the kb grounding
+again alongside the critique. This fixes both Judge failure modes —
+"missed a contract item / didn't satisfy intent" (needs the grounding
+re-presented) and "ungrounded organisation-specific claim" (needs the claim
+removed *and* the real grounding re-anchored) — which a prose-only
+Repairer-style patch could not, because it never re-grounds.
+
+**Bounding (D3).** Budget defaults to **3** refine iterations. The loop
+terminates on whichever comes first: `AllPass()`, budget exhausted, or
+**no-progress** (the set of failing sections stops shrinking — e.g. a
+contract item with genuinely no grounding, which should surface as
+`_Not covered by current sources_`, not loop forever).
+
+**Publish policy (D4).** The loop **improves** output; it is **not** a push
+gate. After the budget is spent (or no-progress) with a still-failing
+verdict, the *best* (last) version is published best-effort and the final
+verdict + iteration count are recorded in the run report. Turning an
+unresolved verdict into a hard push-block remains a deliberate, separate
+policy change — not this slice (a soft-read-only wiki must never skip an
+update because of an advisory critique).
+
+**On by default, with a per-wiki kill-switch (D5).** Each refine iteration
+costs ≈ `2 × (failing sections)` LLM calls (re-synthesis + re-judge), so it
+is config-governed by `max_refine_iterations`. **Unset → 3** (on by default);
+an explicit `max_refine_iterations: 0` turns the loop off for that wiki
+(reverting to report-only). The early-stops cap real-world cost well below
+the worst case. Deterministic under an injected faux client, as everywhere.
+
 ---
 
 ## 6. The KB Maintenance Pipeline (Fact-Checking)
@@ -1119,19 +1183,19 @@ depth is a v2 IR change).
   (v1.0); a no-op provider is wired until this lands
 - Spec authoring via `mykb-curator spec init` LLM conversation
 - `PandocBackend` (IR → Pandoc JSON → docx / PDF / EPUB / RTF)
-- **Judge Agent — closed-loop quality feedback.** An agent that
-  judges a rendered page against its spec + kb (completeness,
-  factual grounding, beginner-readability, structure) and returns
-  structured feedback the curator acts on to improve the output.
-  Generalises the v1.x diagram self-repair loop
-  (`renderdiagrams` `Repairer`: mmdc is a deterministic judge → LLM
-  fix → re-render) from "does it parse" to "is it good". Closes the
-  honest caveat that LLM output quality is currently single-pass
-  with only a graceful-degrade floor. Likely shape: a post-render
-  `Judge` pass/stage producing a verdict + actionable notes; on a
-  failing verdict, re-invoke the editorial frontend with the notes,
-  bounded iterations, then publish best-effort with the verdict
-  recorded in the run report.
+- ~~**Judge Agent — closed-loop quality feedback.**~~ **Designed +
+  building (see §5.7).** Promotes the report-only `Judge` to an
+  acted-on bounded loop: on a failing verdict the failing sections are
+  re-synthesized with the verdict injected as feedback (re-grounded),
+  re-judged, up to `max_refine_iterations` (default 3; `0` = off per
+  wiki), then published best-effort with the final verdict + iteration
+  count in the run report. Generalises the v1.x `renderdiagrams`
+  `Repairer` from "does it parse" to "is it good"; closes the honest
+  caveat that LLM output quality was single-pass with only a
+  graceful-degrade floor. Non-blocking (a hard push-gate stays a
+  separate later policy change). The five design decisions (loop
+  location, re-synthesize-vs-patch, bounding, publish policy,
+  on-by-default) are settled in §5.7.
 
 ---
 
