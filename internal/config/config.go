@@ -23,6 +23,33 @@ type Config struct {
 	Style       StyleConfig       `yaml:"style"`
 	Sinks       SinksConfig       `yaml:"report_sinks"`
 	Sources     SourcesConfig     `yaml:"sources"`
+	Judge       JudgeConfig       `yaml:"judge"`
+}
+
+// JudgeConfig governs the output Judge and its closed refinement loop
+// (DESIGN §5.7).
+type JudgeConfig struct {
+	// MaxRefineIterations bounds the closed Judge loop: on a failing
+	// verdict, failing sections are re-synthesized with the verdict as
+	// feedback, re-judged, up to this many iterations, then published
+	// best-effort. A pointer so "unset" is distinguishable from an
+	// explicit 0: nil ⇒ default 3 (on by default); explicit 0 ⇒ off
+	// (report-only) for this wiki. Read via Config.RefineIterations.
+	MaxRefineIterations *int `yaml:"max_refine_iterations"`
+}
+
+// DefaultRefineIterations is the loop budget when no judge block sets
+// max_refine_iterations (on by default — DESIGN §5.7 D5).
+const DefaultRefineIterations = 3
+
+// RefineIterations returns the closed-Judge-loop budget: the configured
+// value if set (including an explicit 0, which turns the loop off), else
+// DefaultRefineIterations.
+func (c *Config) RefineIterations() int {
+	if c.Judge.MaxRefineIterations == nil {
+		return DefaultRefineIterations
+	}
+	return *c.Judge.MaxRefineIterations
 }
 
 // SourcesConfig configures the non-kb doc-spec source resolvers
@@ -158,6 +185,9 @@ func (c *Config) Validate() error {
 	case "", "sentence", "title":
 	default:
 		return fmt.Errorf("style.heading_case: %q invalid (want \"sentence\", \"title\", or empty)", c.Style.HeadingCase)
+	}
+	if c.Judge.MaxRefineIterations != nil && *c.Judge.MaxRefineIterations < 0 {
+		return fmt.Errorf("judge.max_refine_iterations: %d invalid (must be >= 0; 0 = off)", *c.Judge.MaxRefineIterations)
 	}
 	return nil
 }

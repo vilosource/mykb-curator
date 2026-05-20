@@ -121,3 +121,57 @@ func TestValidate_HeadingCase(t *testing.T) {
 		t.Errorf("heading_case \"SHOUTING\" should be rejected")
 	}
 }
+
+func loadRefineFixture(t *testing.T, judgeBlock string) *Config {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yaml")
+	body := "wiki: acme\n" +
+		"kb_source:\n  type: local\n" +
+		"spec_store:\n  type: local\n" +
+		"wiki_target:\n  type: memory\n" +
+		judgeBlock
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	return cfg
+}
+
+func TestRefineIterations_DefaultsToThreeWhenUnset(t *testing.T) {
+	cfg := loadRefineFixture(t, "")
+	if got := cfg.RefineIterations(); got != 3 {
+		t.Errorf("RefineIterations() with no judge block = %d, want 3 (on by default)", got)
+	}
+}
+
+func TestRefineIterations_ExplicitZeroIsOff(t *testing.T) {
+	cfg := loadRefineFixture(t, "judge:\n  max_refine_iterations: 0\n")
+	if got := cfg.RefineIterations(); got != 0 {
+		t.Errorf("RefineIterations() with explicit 0 = %d, want 0 (off)", got)
+	}
+}
+
+func TestRefineIterations_ExplicitValue(t *testing.T) {
+	cfg := loadRefineFixture(t, "judge:\n  max_refine_iterations: 5\n")
+	if got := cfg.RefineIterations(); got != 5 {
+		t.Errorf("RefineIterations() with explicit 5 = %d, want 5", got)
+	}
+}
+
+func TestValidate_RejectsNegativeRefineIterations(t *testing.T) {
+	neg := -1
+	cfg := &Config{
+		Wiki:       "acme",
+		KBSource:   KBSourceConfig{Type: "local"},
+		SpecStore:  SpecStoreConfig{Type: "local"},
+		WikiTarget: WikiTargetConfig{Type: "memory"},
+		Judge:      JudgeConfig{MaxRefineIterations: &neg},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Errorf("negative max_refine_iterations should be rejected")
+	}
+}
