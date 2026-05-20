@@ -466,3 +466,64 @@ func TestPersona_AudienceLever(t *testing.T) {
 		t.Error("default persona should be human-operator")
 	}
 }
+
+func TestReviseSection_InjectsVerdictAndRegrounds(t *testing.T) {
+	llmC := &seqLLM{resp: []string{"Revised, grounded prose about the 5-node cluster."}}
+	page := docspec.DocPage{
+		Page: "P", Kind: "architecture", Audience: "human-operator",
+		Intent: "A human understands Vault.",
+		Sections: []docspec.DocSection{
+			{Title: "System Architecture", Intent: "Topology + unseal.", Sources: []docspec.Source{src(t, "kb:area=vault tag=ha,raft")}},
+		},
+	}
+	fb := SectionFeedback{
+		Reason:           "did not enumerate the unseal procedure",
+		UngroundedClaims: []string{"runs on 7 nodes"},
+	}
+	sec, err := New(llmC, "m").ReviseSection(context.Background(), page, page.Sections[0], vaultSnap(), fb)
+	if err != nil {
+		t.Fatalf("ReviseSection: %v", err)
+	}
+
+	// Exactly one LLM call for the one revised section.
+	if len(llmC.seen) != 1 {
+		t.Fatalf("want 1 LLM call, got %d", len(llmC.seen))
+	}
+	p := llmC.seen[0].Prompt
+	// Feedback is injected: the reason and the ungrounded claim.
+	if !strings.Contains(p, "did not enumerate the unseal procedure") {
+		t.Errorf("prior verdict reason not injected into prompt:\n%s", p)
+	}
+	if !strings.Contains(p, "runs on 7 nodes") {
+		t.Errorf("ungrounded claim not surfaced for removal/grounding:\n%s", p)
+	}
+	// Re-grounded: the kb digest is presented again alongside the critique.
+	if !strings.Contains(p, "5-node Raft cluster") {
+		t.Errorf("kb grounding not re-presented on revision:\n%s", p)
+	}
+	// Returns the folded section keyed by the docspec section title.
+	if sec.Heading != "System Architecture" {
+		t.Errorf("revised section heading = %q, want %q", sec.Heading, "System Architecture")
+	}
+	if len(sec.Blocks) == 0 {
+		t.Errorf("revised section has no blocks")
+	}
+}
+
+func TestRender_NoFeedbackPromptHasNoPriorDraftBlock(t *testing.T) {
+	// The plain Render path must not carry any feedback scaffolding —
+	// feedback is a revision-only concern.
+	llmC := &seqLLM{resp: []string{"Prose."}}
+	page := docspec.DocPage{
+		Page: "P", Kind: "architecture", Audience: "human-operator", Intent: "I",
+		Sections: []docspec.DocSection{
+			{Title: "S", Intent: "C", Sources: []docspec.Source{src(t, "kb:area=vault")}},
+		},
+	}
+	if _, err := New(llmC, "m").Render(context.Background(), page, vaultSnap()); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(strings.ToLower(llmC.seen[0].Prompt), "prior draft") {
+		t.Errorf("plain Render prompt leaked feedback scaffolding:\n%s", llmC.seen[0].Prompt)
+	}
+}

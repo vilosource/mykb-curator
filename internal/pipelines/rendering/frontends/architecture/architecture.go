@@ -98,25 +98,88 @@ func (f *Frontend) Render(ctx context.Context, page docspec.DocPage, snap kb.Sna
 			continue
 		}
 
-		kbDigest, nonKB, err := f.resolveSources(ctx, sec.Sources, snap)
+		secs, err := f.synthProse(ctx, page, sec, snap, sys, secHash, nil)
 		if err != nil {
-			return ir.Document{}, fmt.Errorf("architecture: section %q: %w", sec.Title, err)
+			return ir.Document{}, err
 		}
-		prompt := composeSectionPrompt(page, sec, kbDigest, nonKB)
-		resp, err := f.llm.Complete(ctx, llm.Request{
-			Model:     f.model,
-			System:    sys,
-			Prompt:    prompt,
-			MaxTokens: 3072,
-		})
-		if err != nil {
-			return ir.Document{}, fmt.Errorf("architecture: section %q: llm: %w", sec.Title, err)
-		}
-
-		body := mdir.Parse(strings.TrimSpace(resp.Text), "architecture", secHash)
-		doc.Sections = append(doc.Sections, foldSection(sec.Title, body, secHash)...)
+		doc.Sections = append(doc.Sections, secs...)
 	}
 	return doc, nil
+}
+
+// SectionFeedback is a prior Judge verdict on a section, fed back into
+// re-synthesis by the closed Judge loop (DESIGN §5.7). It is declared
+// here — not imported from the judge package — so the frontend carries
+// no dependency on the judge; the refine loop maps judge.Verdict ->
+// SectionFeedback.
+type SectionFeedback struct {
+	Reason           string
+	UngroundedClaims []string
+}
+
+// ReviseSection re-synthesizes one prose section with a prior Judge
+// verdict injected as feedback, re-running resolveSources so the kb
+// grounding is presented again alongside the critique. It returns the
+// folded ir.Section (the same single-section shape Render produces for
+// this section), which the refine loop splices back into the page by
+// heading. Intended for judged prose sections (sec.Render == "" &&
+// sec.Intent != ""); the loop only ever revises those.
+func (f *Frontend) ReviseSection(ctx context.Context, page docspec.DocPage, sec docspec.DocSection, snap kb.Snapshot, fb SectionFeedback) (ir.Section, error) {
+	secHash := hashStr(page.Page + "\x00" + sec.Title + "\x00" + sec.Intent + "\x00" + rawSources(sec.Sources))
+	secs, err := f.synthProse(ctx, page, sec, snap, persona(page.Audience), secHash, &fb)
+	if err != nil {
+		return ir.Section{}, err
+	}
+	// foldSection always yields exactly one section keyed by the title.
+	return secs[0], nil
+}
+
+// synthProse synthesizes one prose section into its folded ir.Sections.
+// fb (when non-nil) injects a prior Judge verdict so the model re-grounds
+// and corrects rather than re-rolling blind. Shared by Render (fb nil)
+// and ReviseSection so both compose the identical grounded prompt; only
+// the revision path appends the feedback directive.
+func (f *Frontend) synthProse(ctx context.Context, page docspec.DocPage, sec docspec.DocSection, snap kb.Snapshot, sys, secHash string, fb *SectionFeedback) ([]ir.Section, error) {
+	kbDigest, nonKB, err := f.resolveSources(ctx, sec.Sources, snap)
+	if err != nil {
+		return nil, fmt.Errorf("architecture: section %q: %w", sec.Title, err)
+	}
+	prompt := composeSectionPrompt(page, sec, kbDigest, nonKB)
+	if fb != nil {
+		prompt += composeFeedback(*fb)
+	}
+	resp, err := f.llm.Complete(ctx, llm.Request{
+		Model:     f.model,
+		System:    sys,
+		Prompt:    prompt,
+		MaxTokens: 3072,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("architecture: section %q: llm: %w", sec.Title, err)
+	}
+	body := mdir.Parse(strings.TrimSpace(resp.Text), "architecture", secHash)
+	return foldSection(sec.Title, body, secHash), nil
+}
+
+// composeFeedback renders a prior Judge verdict as a revision directive
+// appended to the section synthesis prompt. Used only on the revision
+// path (ReviseSection); a first-draft Render never carries it.
+func composeFeedback(fb SectionFeedback) string {
+	var sb strings.Builder
+	sb.WriteString("\n\n--- REVISION ---\n")
+	sb.WriteString("A prior draft of this section was rejected by a reviewer. Rewrite it to fix the problems below, using ONLY the grounding shown above; do not repeat the draft's mistakes.\n")
+	if r := strings.TrimSpace(fb.Reason); r != "" {
+		fmt.Fprintf(&sb, "Reviewer reason the draft failed its contract: %s\n", r)
+	}
+	if len(fb.UngroundedClaims) > 0 {
+		sb.WriteString("Claims the reviewer flagged as unsupported by the grounding — remove each one, or restate it ONLY if the grounding above actually supports it:\n")
+		for _, c := range fb.UngroundedClaims {
+			if c = strings.TrimSpace(c); c != "" {
+				fmt.Fprintf(&sb, "- %s\n", c)
+			}
+		}
+	}
+	return sb.String()
 }
 
 // ChildIndexProv marks an empty IndexBlock the cluster orchestrator
