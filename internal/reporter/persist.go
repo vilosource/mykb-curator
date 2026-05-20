@@ -36,6 +36,8 @@ type specResultYAML struct {
 	Reason            string          `yaml:"reason,omitempty"`
 	NewRevisionID     string          `yaml:"new_revision,omitempty"`
 	BlocksRegenerated int             `yaml:"blocks_regenerated,omitempty"`
+	JudgeIterations   int             `yaml:"judge_iterations,omitempty"`
+	JudgeVerdict      string          `yaml:"judge_verdict,omitempty"`
 	HumanEdits        []humanEditYAML `yaml:"human_edits_detected,omitempty"`
 }
 
@@ -121,6 +123,8 @@ func (r Report) toYAML() reportYAML {
 			Reason:            s.Reason,
 			NewRevisionID:     s.NewRevisionID,
 			BlocksRegenerated: s.BlocksRegenerated,
+			JudgeIterations:   s.JudgeIterations,
+			JudgeVerdict:      s.JudgeVerdict,
 		}
 		for _, e := range s.HumanEdits {
 			sy.HumanEdits = append(sy.HumanEdits, humanEditYAML(e))

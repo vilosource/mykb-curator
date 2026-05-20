@@ -68,6 +68,31 @@ func TestMarshal_ProducesParseableYAML(t *testing.T) {
 	}
 }
 
+func TestMarshal_RecordsJudgeLoopOutcome(t *testing.T) {
+	r := Report{
+		RunID: "j1", Wiki: "acme",
+		Specs: []SpecResult{
+			{ID: "topic::Page", Status: StatusRendered, JudgeIterations: 2, JudgeVerdict: "[FAIL Overview: missed unseal]"},
+			{ID: "topic::Clean", Status: StatusRendered, JudgeIterations: 0}, // passed first try → omitted
+		},
+	}
+	b, err := r.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	s := string(b)
+	if !strings.Contains(s, "judge_iterations: 2") {
+		t.Errorf("report must record the refine iteration count:\n%s", s)
+	}
+	if !strings.Contains(s, "judge_verdict:") || !strings.Contains(s, "missed unseal") {
+		t.Errorf("report must record the final failing verdict:\n%s", s)
+	}
+	// A clean first-try page (0 iterations, no verdict) stays quiet.
+	if strings.Contains(s, "judge_iterations: 0") {
+		t.Errorf("zero iterations should be omitted, not noised into the report:\n%s", s)
+	}
+}
+
 func TestWriteToDir_CreatesFileAndLatestSymlink(t *testing.T) {
 	dir := t.TempDir()
 	r := sampleReport()
