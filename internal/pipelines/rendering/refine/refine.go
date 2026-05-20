@@ -40,18 +40,19 @@ type Passes interface {
 	Apply(ctx context.Context, doc ir.Document) (ir.Document, error)
 }
 
-// Loop runs the bounded refine cycle.
+// Loop runs the bounded refine cycle. It holds the run-independent
+// collaborators; the per-run pass pipeline (which closes over the kb
+// snapshot) is supplied to Run.
 type Loop struct {
 	reviser  Reviser
 	reviewer Reviewer
-	passes   Passes // may be nil
 	maxIters int
 }
 
 // NewLoop binds a Loop. maxIters is the refinement budget (0 = off,
 // i.e. report-only — the page is judged once and published as drafted).
-func NewLoop(r Reviser, j Reviewer, p Passes, maxIters int) *Loop {
-	return &Loop{reviser: r, reviewer: j, passes: p, maxIters: maxIters}
+func NewLoop(r Reviser, j Reviewer, maxIters int) *Loop {
+	return &Loop{reviser: r, reviewer: j, maxIters: maxIters}
 }
 
 // Result is the outcome of a refine run.
@@ -66,10 +67,10 @@ type Result struct {
 // re-applies the passes, and re-judges — until AllPass, the budget is
 // spent, or no progress is made. It returns the final post-pass doc,
 // the final verdict, and the number of refine rounds performed.
-func (l *Loop) Run(ctx context.Context, page docspec.DocPage, preDoc ir.Document, snap kb.Snapshot, grounding map[string]string) (Result, error) {
+func (l *Loop) Run(ctx context.Context, page docspec.DocPage, preDoc ir.Document, snap kb.Snapshot, grounding map[string]string, p Passes) (Result, error) {
 	work := preDoc // pre-pass base we splice revisions into
 
-	applied, err := l.apply(ctx, work)
+	applied, err := apply(ctx, p, work)
 	if err != nil {
 		return Result{}, err
 	}
@@ -106,7 +107,7 @@ func (l *Loop) Run(ctx context.Context, page docspec.DocPage, preDoc ir.Document
 			break // nothing actionable to revise
 		}
 
-		applied, err = l.apply(ctx, work)
+		applied, err = apply(ctx, p, work)
 		if err != nil {
 			return Result{}, err
 		}
@@ -126,11 +127,11 @@ func (l *Loop) Run(ctx context.Context, page docspec.DocPage, preDoc ir.Document
 	return Result{Doc: applied, Report: rep, Iterations: iters}, nil
 }
 
-func (l *Loop) apply(ctx context.Context, doc ir.Document) (ir.Document, error) {
-	if l.passes == nil {
+func apply(ctx context.Context, p Passes, doc ir.Document) (ir.Document, error) {
+	if p == nil {
 		return doc, nil
 	}
-	return l.passes.Apply(ctx, doc)
+	return p.Apply(ctx, doc)
 }
 
 // feedback maps a failing Judge verdict to the frontend's feedback type.

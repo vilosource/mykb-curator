@@ -31,6 +31,14 @@ type SpecResult struct {
 	NewRevisionID     string
 	BlocksRegenerated int
 	HumanEdits        []HumanEditEvent
+
+	// JudgeIterations is the number of closed-loop refine rounds the
+	// Judge drove for this page (0 = published as first drafted, or the
+	// loop is off / no Judge wired). JudgeVerdict summarises the final
+	// verdict when it did not fully pass; "" when it passed or no Judge
+	// ran. Both are observational (the loop never blocks a push).
+	JudgeIterations int
+	JudgeVerdict    string
 }
 
 // SpecStatus is the disposition of one spec in one run.

@@ -66,6 +66,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes/resolvekbrefs"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes/validatelinks"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes/zonemarkers"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/refine"
 	"github.com/vilosource/mykb-curator/internal/reporter"
 	"github.com/vilosource/mykb-curator/internal/reporter/sinks"
 	gitsrc "github.com/vilosource/mykb-curator/internal/sources/git"
@@ -236,12 +237,18 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 	var docSpecStore *docspecslocalfs.Store
 	var clusterRenderer *cluster.Cluster
 	var outputJudge *judge.Judge
+	var outputRefiner *refine.Loop
 	if llmClient != nil && cfg.SpecStore.Type == "local" && cfg.SpecStore.Repo != "" {
 		gitResolver := gitsrc.New(cfg.Sources.Git.Root, cfg.Sources.Git.Repos)
 		archFrontend := architecture.New(llmClient, cfg.LLM.Model, gitResolver)
 		clusterRenderer = cluster.New(archFrontend)
 		docSpecStore = docspecslocalfs.New(cfg.SpecStore.Repo)
 		outputJudge = judge.New(llmClient, cfg.LLM.Model)
+		// Closed Judge loop (DESIGN §5.7): the architecture frontend is
+		// the Reviser, the Judge the Reviewer. max_refine_iterations
+		// defaults to 3 (on by default); an explicit 0 makes the loop
+		// report-only for this wiki. Per-run passes are supplied to Run.
+		outputRefiner = refine.NewLoop(archFrontend, outputJudge, cfg.RefineIterations())
 	}
 
 	// Pass pipeline is per-run because ResolveKBRefs closes over the
@@ -303,6 +310,7 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 		deps.DocSpecs = docSpecStore
 		deps.Cluster = clusterRenderer
 		deps.Judge = outputJudge
+		deps.Refiner = outputRefiner
 	}
 	orch := orchestrator.New(deps)
 

@@ -90,7 +90,7 @@ func TestRun_PassesFirstTry_NoRevision(t *testing.T) {
 	rev := &fakeReviser{}
 	jr := &seqReviewer{reports: []judge.Report{report(pass("A"), pass("B"))}}
 	p := &identityPasses{}
-	res, err := NewLoop(rev, jr, p, 3).Run(context.Background(), twoProse(), preDoc(), kb.Snapshot{}, nil)
+	res, err := NewLoop(rev, jr, 3).Run(context.Background(), twoProse(), preDoc(), kb.Snapshot{}, nil, p)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestRun_FailsThenPasses_RevisesOnlyFailingSection(t *testing.T) {
 		report(fail("A"), pass("B")),
 		report(pass("A"), pass("B")),
 	}}
-	res, err := NewLoop(rev, jr, &identityPasses{}, 3).Run(context.Background(), twoProse(), preDoc(), kb.Snapshot{}, nil)
+	res, err := NewLoop(rev, jr, 3).Run(context.Background(), twoProse(), preDoc(), kb.Snapshot{}, nil, &identityPasses{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestRun_BudgetExhausted_PublishesBestEffort(t *testing.T) {
 		report(pass("A"), fail("B")), // 1 failing
 		report(pass("A"), fail("B")), // still 1 failing (budget hit before this matters)
 	}}
-	res, err := NewLoop(rev, jr, &identityPasses{}, 2).Run(context.Background(), twoProse(), preDoc(), kb.Snapshot{}, nil)
+	res, err := NewLoop(rev, jr, 2).Run(context.Background(), twoProse(), preDoc(), kb.Snapshot{}, nil, &identityPasses{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestRun_NoProgress_EarlyStop(t *testing.T) {
 		report(fail("A"), fail("B")), // 2 failing
 		report(fail("A"), fail("B")), // still 2 failing → no progress
 	}}
-	res, err := NewLoop(rev, jr, &identityPasses{}, 5).Run(context.Background(), twoProse(), preDoc(), kb.Snapshot{}, nil)
+	res, err := NewLoop(rev, jr, 5).Run(context.Background(), twoProse(), preDoc(), kb.Snapshot{}, nil, &identityPasses{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestRun_NoProgress_EarlyStop(t *testing.T) {
 func TestRun_LoopOff_IsReportOnly(t *testing.T) {
 	rev := &fakeReviser{}
 	jr := &seqReviewer{reports: []judge.Report{report(fail("A"), pass("B"))}}
-	res, err := NewLoop(rev, jr, &identityPasses{}, 0).Run(context.Background(), twoProse(), preDoc(), kb.Snapshot{}, nil)
+	res, err := NewLoop(rev, jr, 0).Run(context.Background(), twoProse(), preDoc(), kb.Snapshot{}, nil, &identityPasses{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestRun_NilPasses_Works(t *testing.T) {
 		report(fail("A"), pass("B")),
 		report(pass("A"), pass("B")),
 	}}
-	res, err := NewLoop(rev, jr, nil, 3).Run(context.Background(), twoProse(), preDoc(), kb.Snapshot{}, nil)
+	res, err := NewLoop(rev, jr, 3).Run(context.Background(), twoProse(), preDoc(), kb.Snapshot{}, nil, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -205,14 +205,14 @@ func TestRun_NilPasses_Works(t *testing.T) {
 func TestRun_ReviserError_Propagates(t *testing.T) {
 	rev := &fakeReviser{err: errors.New("llm down")}
 	jr := &seqReviewer{reports: []judge.Report{report(fail("A"), pass("B"))}}
-	if _, err := NewLoop(rev, jr, &identityPasses{}, 3).Run(context.Background(), twoProse(), preDoc(), kb.Snapshot{}, nil); err == nil {
+	if _, err := NewLoop(rev, jr, 3).Run(context.Background(), twoProse(), preDoc(), kb.Snapshot{}, nil, &identityPasses{}); err == nil {
 		t.Errorf("a reviser error must propagate, not be swallowed")
 	}
 }
 
 func TestRun_JudgeError_Propagates(t *testing.T) {
 	jr := &seqReviewer{err: errors.New("judge down")}
-	if _, err := NewLoop(&fakeReviser{}, jr, &identityPasses{}, 3).Run(context.Background(), twoProse(), preDoc(), kb.Snapshot{}, nil); err == nil {
+	if _, err := NewLoop(&fakeReviser{}, jr, 3).Run(context.Background(), twoProse(), preDoc(), kb.Snapshot{}, nil, &identityPasses{}); err == nil {
 		t.Errorf("a judge error must propagate")
 	}
 }

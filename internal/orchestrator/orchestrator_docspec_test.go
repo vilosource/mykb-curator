@@ -11,7 +11,9 @@ import (
 	"github.com/vilosource/mykb-curator/internal/judge"
 	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/cluster"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/architecture"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/refine"
 	"github.com/vilosource/mykb-curator/internal/reporter"
 	"github.com/vilosource/mykb-curator/internal/specs/docspec"
 )
@@ -213,3 +215,109 @@ func contains(xs []string, want string) bool {
 
 var _ docspecs.Store = fakeDocSpecs{}
 var _ specs.Store = fakeSpecs{}
+
+// fakeReviser re-synthesizes a section into fresh "revised" prose,
+// recording each title it revised.
+type fakeReviser struct{ calls []string }
+
+func (r *fakeReviser) ReviseSection(_ context.Context, _ docspec.DocPage, sec docspec.DocSection, _ kb.Snapshot, _ architecture.SectionFeedback) (ir.Section, error) {
+	r.calls = append(r.calls, sec.Title)
+	return ir.Section{Heading: sec.Title, Blocks: []ir.Block{ir.ProseBlock{Text: "revised " + sec.Title}}}, nil
+}
+
+// flipJudgeLLM fails the first review and passes every review after,
+// so the closed loop converges in exactly one refine round.
+type flipJudgeLLM struct{ calls int }
+
+func (j *flipJudgeLLM) Complete(context.Context, llm.Request) (llm.Response, error) {
+	j.calls++
+	if j.calls == 1 {
+		return llm.Response{Text: `{"pass": false, "reason": "ungrounded version", "ungrounded_claims": ["X 1.2"]}`}, nil
+	}
+	return llm.Response{Text: `{"pass": true, "reason": "ok", "ungrounded_claims": []}`}, nil
+}
+
+func TestRun_DocSpec_RefinerConverges_RecordsIterationsAndClearsVerdict(t *testing.T) {
+	rev := &fakeReviser{}
+	o := New(Deps{
+		Wiki:       "acme",
+		KB:         fakeKB{commit: "abc"},
+		Specs:      fakeSpecs{},
+		WikiTarget: fakeWiki{},
+		Backend:    fakeBackend{},
+		DocSpecs:   fakeDocSpecs{files: []docspecs.File{{ID: "vault.doc.yaml", Spec: vaultCluster()}}},
+		Cluster:    cluster.New(fakeRenderer{}),
+		Refiner:    refine.NewLoop(rev, judge.New(&flipJudgeLLM{}, "m"), 3),
+	})
+
+	rep, err := o.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	parent := specResult(rep, "vault.doc.yaml::Vault Architecture")
+	if parent == nil {
+		t.Fatalf("no result for parent page")
+	}
+	if parent.Status != reporter.StatusRendered {
+		t.Errorf("parent status = %q, want rendered (non-blocking)", parent.Status)
+	}
+	if parent.JudgeIterations != 1 {
+		t.Errorf("parent JudgeIterations = %d, want 1 (failed once, passed after a refine)", parent.JudgeIterations)
+	}
+	if parent.JudgeVerdict != "" {
+		t.Errorf("parent JudgeVerdict = %q, want empty (final verdict passed)", parent.JudgeVerdict)
+	}
+	if len(rev.calls) != 1 || rev.calls[0] != "Overview" {
+		t.Errorf("reviser calls = %v, want exactly [Overview] (only the failing section)", rev.calls)
+	}
+}
+
+func TestRun_DocSpec_RefinerNonBlocking_PublishesBestEffortWithVerdict(t *testing.T) {
+	rev := &fakeReviser{}
+	o := New(Deps{
+		Wiki:       "acme",
+		KB:         fakeKB{commit: "abc"},
+		Specs:      fakeSpecs{},
+		WikiTarget: fakeWiki{},
+		Backend:    fakeBackend{},
+		DocSpecs:   fakeDocSpecs{files: []docspecs.File{{ID: "vault.doc.yaml", Spec: vaultCluster()}}},
+		Cluster:    cluster.New(fakeRenderer{}),
+		Refiner:    refine.NewLoop(rev, judge.New(judgeLLM{}, "m"), 3), // judgeLLM always fails
+	})
+
+	rep, err := o.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	parent := specResult(rep, "vault.doc.yaml::Vault Architecture")
+	if parent == nil {
+		t.Fatalf("no result for parent page")
+	}
+	// Never blocks: still rendered+pushed despite a persistent failure.
+	if parent.Status != reporter.StatusRendered {
+		t.Errorf("parent status = %q, want rendered (best-effort publish)", parent.Status)
+	}
+	// A persistent single-section failure triggers the no-progress stop
+	// after one refine round; the final verdict is recorded.
+	if parent.JudgeIterations != 1 {
+		t.Errorf("parent JudgeIterations = %d, want 1 (no-progress stop)", parent.JudgeIterations)
+	}
+	if !strings.Contains(parent.JudgeVerdict, "Overview") {
+		t.Errorf("parent JudgeVerdict should name the still-failing section, got %q", parent.JudgeVerdict)
+	}
+	joined := strings.Join(rep.Warnings, " | ")
+	if !strings.Contains(joined, "best-effort") {
+		t.Errorf("expected a best-effort warning, got: %v", rep.Warnings)
+	}
+}
+
+func specResult(rep reporter.Report, id string) *reporter.SpecResult {
+	for i := range rep.Specs {
+		if rep.Specs[i].ID == id {
+			return &rep.Specs[i]
+		}
+	}
+	return nil
+}

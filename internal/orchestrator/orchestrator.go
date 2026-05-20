@@ -29,6 +29,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/reconciler"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/refine"
 	"github.com/vilosource/mykb-curator/internal/reporter"
 	"github.com/vilosource/mykb-curator/internal/specs/docspec"
 )
@@ -120,7 +121,19 @@ type Deps struct {
 	// rendered cluster page is reviewed against its declared intent
 	// and the verdict is surfaced on the run report. It NEVER blocks
 	// a push — a failing verdict is a warning, not a failure.
+	//
+	// When Refiner is also wired, the Judge runs inside the closed loop
+	// (DESIGN §5.7) rather than as a standalone report-only review;
+	// processClusterPage prefers Refiner.
 	Judge *judge.Judge
+
+	// Refiner is the closed Judge loop (DESIGN §5.7). When set, it owns
+	// pass application + judging + bounded re-synthesis for cluster
+	// pages, returning the final post-pass doc + verdict + iteration
+	// count. Nil = the legacy path (passes inline; report-only Judge if
+	// Judge is set). The loop is still non-blocking — best-effort
+	// publish with the verdict recorded on the report.
+	Refiner *refine.Loop
 }
 
 // Orchestrator drives one curator run end-to-end.
@@ -230,39 +243,58 @@ func (o *Orchestrator) processClusterPage(ctx context.Context, dsID string, p cl
 	id := dsID + "::" + p.Page
 	doc := p.Doc
 
-	var err error
-	if passPipeline != nil {
-		doc, err = passPipeline.Apply(ctx, doc)
-		if err != nil {
-			return reporter.SpecResult{ID: id, Status: reporter.StatusFailed, Reason: err.Error()}
-		}
-	}
+	var judgeIters int
+	var judgeVerdict string
 
-	// Judge BEFORE push — report-only. A failing or inconclusive
-	// verdict is a warning on the report, never a push gate.
-	if o.deps.Judge != nil && page.Page != "" {
-		// Give the Judge the SAME kb grounding synthesis received, so
-		// it verifies organisation-specific claims against the real
-		// sources instead of guessing (and false-positiving kb-backed
-		// facts). Keyed by section title, matching Judge.Review.
-		grounding := make(map[string]string, len(page.Sections))
-		for _, sec := range page.Sections {
-			if sec.Render != "" || strings.TrimSpace(sec.Intent) == "" {
-				continue // structural / no contract — Judge skips it too
-			}
-			if g := architecture.SectionGrounding(snap, sec); g != "" {
-				grounding[sec.Title] = g
+	switch {
+	case o.deps.Refiner != nil && page.Page != "":
+		// Closed Judge loop (DESIGN §5.7): the Refiner owns pass
+		// application + judging + bounded re-synthesis, starting from the
+		// pre-pass cluster doc. Non-blocking — best-effort publish with
+		// the verdict recorded. Grounding is the SAME kb digest synthesis
+		// received (keyed by section title) so the Judge verifies
+		// organisation-specific claims against the real sources.
+		// Guard the typed-nil interface: a nil *passes.Pipeline passed as
+		// refine.Passes would be a non-nil interface wrapping a nil
+		// pointer, defeating the loop's nil check.
+		var rp refine.Passes
+		if passPipeline != nil {
+			rp = passPipeline
+		}
+		res, rerr := o.deps.Refiner.Run(ctx, page, doc, snap, clusterGrounding(page, snap), rp)
+		if rerr != nil {
+			return reporter.SpecResult{ID: id, Status: reporter.StatusFailed, Reason: rerr.Error()}
+		}
+		doc = res.Doc
+		judgeIters = res.Iterations
+		if !res.Report.AllPass() {
+			judgeVerdict = summariseVerdicts(res.Report)
+			rb.AddWarning(fmt.Sprintf("judge %q: published best-effort after %d refine iteration(s): %s", p.Page, judgeIters, judgeVerdict))
+		}
+
+	default:
+		// Legacy path: passes inline, report-only Judge (no refinement).
+		var err error
+		if passPipeline != nil {
+			doc, err = passPipeline.Apply(ctx, doc)
+			if err != nil {
+				return reporter.SpecResult{ID: id, Status: reporter.StatusFailed, Reason: err.Error()}
 			}
 		}
-		if rep, jerr := o.deps.Judge.Review(ctx, page, doc, grounding); jerr != nil {
-			rb.AddWarning(fmt.Sprintf("judge %q: %v", p.Page, jerr))
-		} else if !rep.AllPass() {
-			rb.AddWarning(fmt.Sprintf("judge %q: %s", p.Page, summariseVerdicts(rep)))
+		// Judge BEFORE push — report-only. A failing or inconclusive
+		// verdict is a warning on the report, never a push gate.
+		if o.deps.Judge != nil && page.Page != "" {
+			if rep, jerr := o.deps.Judge.Review(ctx, page, doc, clusterGrounding(page, snap)); jerr != nil {
+				rb.AddWarning(fmt.Sprintf("judge %q: %v", p.Page, jerr))
+			} else if !rep.AllPass() {
+				judgeVerdict = summariseVerdicts(rep)
+				rb.AddWarning(fmt.Sprintf("judge %q: %s", p.Page, judgeVerdict))
+			}
 		}
 	}
 
 	if o.deps.Backend == nil || o.deps.WikiTarget == nil {
-		return reporter.SpecResult{ID: id, Status: reporter.StatusRendered, BlocksRegenerated: countBlocks(doc)}
+		return reporter.SpecResult{ID: id, Status: reporter.StatusRendered, BlocksRegenerated: countBlocks(doc), JudgeIterations: judgeIters, JudgeVerdict: judgeVerdict}
 	}
 	rendered, err := o.deps.Backend.Render(doc)
 	if err != nil {
@@ -280,6 +312,8 @@ func (o *Orchestrator) processClusterPage(ctx context.Context, dsID string, p cl
 		BlocksRegenerated: countBlocks(doc),
 		HumanEdits:        pr.HumanEdits,
 		NewRevisionID:     pr.NewRevisionID,
+		JudgeIterations:   judgeIters,
+		JudgeVerdict:      judgeVerdict,
 	}
 	if pr.NoOp {
 		res.Status = reporter.StatusSkipped
@@ -299,6 +333,24 @@ func docPagesByTitle(s docspec.DocSpec) map[string]docspec.DocPage {
 		m[c.Page] = c
 	}
 	return m
+}
+
+// clusterGrounding builds the section-title → kb-grounding map the
+// Judge (and the refine loop's re-synthesis) needs: the SAME digest
+// synthesis received for each judged prose section, so claims are
+// verified against the real sources instead of guessed. Structural /
+// no-intent sections carry no narrative contract and are excluded.
+func clusterGrounding(page docspec.DocPage, snap kb.Snapshot) map[string]string {
+	grounding := make(map[string]string, len(page.Sections))
+	for _, sec := range page.Sections {
+		if sec.Render != "" || strings.TrimSpace(sec.Intent) == "" {
+			continue
+		}
+		if g := architecture.SectionGrounding(snap, sec); g != "" {
+			grounding[sec.Title] = g
+		}
+	}
+	return grounding
 }
 
 func summariseVerdicts(r judge.Report) string {
