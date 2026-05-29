@@ -21,9 +21,16 @@ RUN CGO_ENABLED=0 go build -o /out/mykb-curator ./cmd/mykb-curator
 # libraries the slim image lacks, and inside a container it must run
 # with --no-sandbox — supplied via a puppeteer config file referenced
 # by MMDC_PUPPETEER_CONFIG (honoured by the Go MermaidRenderer).
+#
+# git is required by the internal/sources/git resolver: specs whose
+# render:table (or section sources) reference `git:` repo paths (e.g.
+# the vault cluster's "Source Code & IaC" table over hashicorp-vault)
+# shell out to the git CLI. Without it those specs fail with
+# `exec: "git": executable file not found in $PATH`.
 FROM node:20-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    git \
     fonts-liberation \
     libasound2 libatk-bridge2.0-0 libatk1.0-0 libcairo2 libcups2 \
     libdbus-1-3 libdrm2 libgbm1 libglib2.0-0 libnspr4 libnss3 \
@@ -32,6 +39,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g @mermaid-js/mermaid-cli@11.15.0 \
     && npx --yes puppeteer browsers install chrome-headless-shell
+
+# The git source resolver runs as root against bind-mounted repos
+# owned by the operator's uid, which trips git's dubious-ownership
+# guard ("detected dubious ownership in repository"). The container
+# only ever reads operator-controlled, read-only mounts, so trust any
+# repo path here.
+RUN git config --system --add safe.directory '*'
 
 # Puppeteer cannot use its sandbox inside an unprivileged container;
 # mermaid-cli reads these args via -p (the renderer passes it when
