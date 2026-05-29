@@ -105,6 +105,90 @@ func TestPull_ToleratesCSVStringTags(t *testing.T) {
 	}
 }
 
+// mykb JSONL is append-only: `kb update <id>` appends a new line with
+// the same id (latest last). The SQLite index does latest-version-wins;
+// the file reader must too, or superseded text leaks into grounding and
+// render:table emits one row per line (issue #3). Matches mykb's own
+// resolveEntries (src/core/store.ts): first-seen position, last write
+// wins.
+func TestPull_DedupesByIDKeepingLatestVersion(t *testing.T) {
+	root := t.TempDir()
+	areaDir := filepath.Join(root, "areas", "gitlab-runners")
+	if err := os.MkdirAll(areaDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(areaDir, "area.json"),
+		[]byte(`{"id":"gitlab-runners","name":"GitLab Runners","summary":"s"}`), 0o600); err != nil {
+		t.Fatalf("area.json: %v", err)
+	}
+	// Two versions of IFWZmGLD (the issue's live repro), with an
+	// unrelated fact appended between them.
+	facts := `{"id":"IFWZmGLD","area":"gitlab-runners","type":"fact","text":"419 cicd Hetzner bare-metal","zone":"active","updated":"2026-05-01T00:00:00Z"}
+{"id":"OTHER001","area":"gitlab-runners","type":"fact","text":"unrelated fact","zone":"active"}
+{"id":"IFWZmGLD","area":"gitlab-runners","type":"fact","text":"all pools are Azure VMSS","zone":"active","updated":"2026-05-20T00:00:00Z"}
+`
+	if err := os.WriteFile(filepath.Join(areaDir, "facts.jsonl"), []byte(facts), 0o600); err != nil {
+		t.Fatalf("facts: %v", err)
+	}
+
+	snap, err := New(root).Pull(context.Background())
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	a := snap.Area("gitlab-runners")
+	if a == nil {
+		t.Fatalf("area not loaded")
+	}
+	facts2 := a.EntriesByType("fact")
+	if len(facts2) != 2 {
+		t.Fatalf("len(facts) = %d, want 2 (superseded version must collapse); got %+v", len(facts2), facts2)
+	}
+	// First-seen position is preserved (matches mykb resolveEntries).
+	if facts2[0].ID != "IFWZmGLD" || facts2[1].ID != "OTHER001" {
+		t.Errorf("order = [%s %s], want [IFWZmGLD OTHER001] (first-seen position)", facts2[0].ID, facts2[1].ID)
+	}
+	if facts2[0].Text != "all pools are Azure VMSS" {
+		t.Errorf("IFWZmGLD text = %q, want the latest version", facts2[0].Text)
+	}
+}
+
+// `kb delete <id>` appends a tombstone line ({"deleted":true}); mykb's
+// resolveEntries removes the id entirely. The curator's reader was
+// instead parsing the tombstone into a blank Entry that leaked as an
+// empty row.
+func TestPull_DropsTombstonedEntries(t *testing.T) {
+	root := t.TempDir()
+	areaDir := filepath.Join(root, "areas", "vault")
+	if err := os.MkdirAll(areaDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(areaDir, "area.json"),
+		[]byte(`{"id":"vault","name":"Vault","summary":"s"}`), 0o600); err != nil {
+		t.Fatalf("area.json: %v", err)
+	}
+	// f1 added then deleted; f2 stays.
+	facts := `{"id":"f1","area":"vault","type":"fact","text":"deleted me","zone":"active"}
+{"id":"f2","area":"vault","type":"fact","text":"survivor","zone":"active"}
+{"id":"f1","area":"vault","deleted":true,"updated":"2026-05-20T00:00:00Z"}
+`
+	if err := os.WriteFile(filepath.Join(areaDir, "facts.jsonl"), []byte(facts), 0o600); err != nil {
+		t.Fatalf("facts: %v", err)
+	}
+
+	snap, err := New(root).Pull(context.Background())
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	a := snap.Area("vault")
+	if a == nil {
+		t.Fatalf("area not loaded")
+	}
+	got := a.EntriesByType("fact")
+	if len(got) != 1 || got[0].ID != "f2" {
+		t.Fatalf("tombstoned entry must be dropped; want exactly [f2], got %+v", got)
+	}
+}
+
 func equalStrs(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

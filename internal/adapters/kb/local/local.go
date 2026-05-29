@@ -129,7 +129,21 @@ func loadArea(dir string) (kb.Area, error) {
 	return a, nil
 }
 
-// loadJSONL reads one JSONL file (one JSON object per non-blank line).
+// loadJSONL reads one JSONL file (one JSON object per non-blank line)
+// and resolves it to latest-version-wins, matching mykb's own
+// resolveEntries (mykb src/core/store.ts).
+//
+// mykb JSONL is append-only: `kb update <id>` appends a new line with
+// the same id (latest last) and `kb delete <id>` appends a tombstone
+// ({"deleted":true}). mykb's SQLite index collapses these on read; the
+// file reader must too. Without it an un-compacted brain leaks
+// superseded text into synthesis grounding and emits duplicate
+// render:table rows, while tombstoned entries reappear (issue #3).
+//
+// Resolution mirrors mykb's Map semantics: keyed by id, the first
+// occurrence fixes the output position and the last write wins;
+// tombstoned ids are dropped entirely. `kb compact` is then a no-op
+// for curation rather than a required workaround.
 func loadJSONL(path string) ([]kb.Entry, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -137,7 +151,9 @@ func loadJSONL(path string) ([]kb.Entry, error) {
 	}
 	defer f.Close()
 
-	var out []kb.Entry
+	var order []string               // ids in first-seen order
+	latest := map[string]*kb.Entry{} // id -> latest version; nil == tombstoned
+
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
@@ -154,6 +170,7 @@ func loadJSONL(path string) ([]kb.Entry, error) {
 			Zone       string    `json:"zone"`
 			Created    string    `json:"created"`
 			Updated    string    `json:"updated"`
+			Deleted    bool      `json:"deleted"`
 			Provenance struct {
 				Status string `json:"status"`
 				Source string `json:"source"`
@@ -166,7 +183,14 @@ func loadJSONL(path string) ([]kb.Entry, error) {
 		if err := json.Unmarshal([]byte(line), &raw); err != nil {
 			return nil, fmt.Errorf("parse entry: %w (line: %s)", err, line)
 		}
-		out = append(out, kb.Entry{
+		if _, seen := latest[raw.ID]; !seen {
+			order = append(order, raw.ID)
+		}
+		if raw.Deleted {
+			latest[raw.ID] = nil
+			continue
+		}
+		latest[raw.ID] = &kb.Entry{
 			ID:         raw.ID,
 			Area:       raw.Area,
 			Type:       raw.Type,
@@ -180,9 +204,19 @@ func loadJSONL(path string) ([]kb.Entry, error) {
 			Rejected:   raw.Rejected,
 			Context:    raw.Context,
 			URL:        raw.URL,
-		})
+		}
 	}
-	return out, sc.Err()
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make([]kb.Entry, 0, len(order))
+	for _, id := range order {
+		if e := latest[id]; e != nil {
+			out = append(out, *e)
+		}
+	}
+	return out, nil
 }
 
 // csvOrList tolerates `tags` being either a JSON array of strings
