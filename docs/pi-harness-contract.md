@@ -13,11 +13,11 @@ with `--mode json`. The clean, deterministic, side-effect-free
 single-shot invocation the `pi-wrapper` shim must use:
 
 ```
+printf '%s' "<prompt>" | \
 pi --print --mode json \
    --no-tools --no-session --no-extensions --no-skills \
    [--provider <p>] [--model <m>] [--api-key <k>] \
-   [--system-prompt <s>] \
-   <prompt>
+   [--system-prompt <s>]
 ```
 
 - `--print` — process the prompt and exit (no TUI).
@@ -30,8 +30,15 @@ pi --print --mode json \
   Pi a *plain LLM*, not the operator's `kb-pi` agent.
 - `--provider/--model/--api-key` — pinned by the curator config /
   pi-harness env; omitted ⇒ pi's configured default.
-- The prompt is the trailing positional arg. The system prompt goes
-  via `--system-prompt` (or `--append-system-prompt`).
+- The prompt is delivered on **stdin**, not as a trailing positional
+  arg. Grounded curator prompts routinely exceed the OS per-arg limit
+  (Linux `MAX_ARG_STRLEN`, 128KB); a positional arg fails with
+  `argument list too long` (E2BIG), which blocked the full
+  vault-cluster DR + hetzner-heavy sections. `pi` reads piped stdin
+  when stdin is not a TTY and prepends it to the initial message
+  (verified against `pi-coding-agent@0.66.1`: `readPipedStdin` +
+  `buildInitialMessage`). The system prompt is small and bounded, so
+  it stays on `--system-prompt` (or `--append-system-prompt`).
 
 ## Output: a JSONL event stream (NOT one JSON document)
 

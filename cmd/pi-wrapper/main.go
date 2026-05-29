@@ -115,11 +115,21 @@ func (s *server) complete(w http.ResponseWriter, r *http.Request) {
 // docs/pi-harness-contract.md (resolved by the design spike).
 //
 //	pi --print --mode json --no-tools --no-session --no-extensions
-//	   --no-skills [--model M] [--system-prompt S] <prompt>
+//	   --no-skills [--model M] [--system-prompt S]   (prompt on stdin)
 //
 // --no-tools/-session/-extensions/-skills keep this a plain LLM call,
 // not the operator's kb-pi agent. MaxTokens has no pi flag and is
 // intentionally ignored (documented in the contract).
+//
+// The prompt is delivered on stdin, NOT as a trailing argv arg:
+// grounded curator prompts routinely exceed the OS per-arg limit
+// (Linux MAX_ARG_STRLEN, 128KB) and a positional arg fails with
+// "argument list too long" (E2BIG), which previously blocked the
+// full vault-cluster DR + hetzner-heavy sections. pi reads piped
+// stdin when stdin is not a TTY and prepends it to the initial
+// message — verified against pi-coding-agent@0.66.1 (main.js
+// readPipedStdin + cli/initial-message.js buildInitialMessage), the
+// version pinned in deployments/pi-harness/Dockerfile.
 func (s *server) invokePi(ctx context.Context, req completeRequest) (completeResponse, error) {
 	args := []string{
 		"--print", "--mode", "json",
@@ -131,9 +141,9 @@ func (s *server) invokePi(ctx context.Context, req completeRequest) (completeRes
 	if strings.TrimSpace(req.System) != "" {
 		args = append(args, "--system-prompt", req.System)
 	}
-	args = append(args, req.Prompt)
 
 	cmd := exec.CommandContext(ctx, s.piBin, args...)
+	cmd.Stdin = strings.NewReader(req.Prompt)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

@@ -112,6 +112,80 @@ func fakePi(t *testing.T, stream string, fail bool) string {
 	return bin
 }
 
+// fakePiCapture writes a fake `pi` that records its argv (one line per
+// arg) to <dir>/argv and its stdin to <dir>/stdin, then emits the
+// canned stream. Returns (binPath, dir) so the test can inspect what
+// pi actually received.
+func fakePiCapture(t *testing.T, stream string) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "pi")
+	body := "#!/bin/sh\n" +
+		"for a in \"$@\"; do printf '%s\\n' \"$a\"; done > " + filepath.Join(dir, "argv") + "\n" +
+		"cat > " + filepath.Join(dir, "stdin") + "\n" +
+		"cat <<'PIEOF'\n" + stream + "\nPIEOF\n"
+	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
+		t.Fatalf("write fake pi: %v", err)
+	}
+	return bin, dir
+}
+
+// The prompt must travel on stdin, never as a trailing argv arg:
+// grounded curator prompts routinely exceed the OS arg limit and a
+// positional arg fails with "argument list too long". pi reads piped
+// stdin and prepends it to the initial message (verified against
+// pi-coding-agent@0.66.1).
+func TestInvokePi_PromptDeliveredViaStdinNotArgv(t *testing.T) {
+	stream := `{"type":"agent_end","messages":[{"role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input":1,"output":1}}]}`
+	bin, dir := fakePiCapture(t, stream)
+	s := &server{piBin: bin}
+
+	const marker = "GROUNDING-MARKER"
+	prompt := marker + " " + strings.Repeat("x", 4096)
+	if _, err := s.invokePi(context.Background(), completeRequest{
+		Prompt: prompt, Model: "google/gemini-2.5-flash", System: "be terse",
+	}); err != nil {
+		t.Fatalf("invokePi: %v", err)
+	}
+
+	argv, err := os.ReadFile(filepath.Join(dir, "argv"))
+	if err != nil {
+		t.Fatalf("read argv: %v", err)
+	}
+	stdin, err := os.ReadFile(filepath.Join(dir, "stdin"))
+	if err != nil {
+		t.Fatalf("read stdin: %v", err)
+	}
+	if strings.Contains(string(argv), marker) {
+		t.Errorf("prompt must NOT be an argv arg (ARG_MAX overflow); argv:\n%s", argv)
+	}
+	if !strings.Contains(string(stdin), marker) {
+		t.Errorf("prompt must be delivered on stdin; got stdin=%q", stdin)
+	}
+	// Flags + system prompt still go via argv (they are small + bounded).
+	if !strings.Contains(string(argv), "--system-prompt") || !strings.Contains(string(argv), "--mode") {
+		t.Errorf("expected flags + --system-prompt on argv, got:\n%s", argv)
+	}
+}
+
+// A single argv arg above the Linux per-arg limit (MAX_ARG_STRLEN,
+// 128KB) fails with E2BIG ("argument list too long") — the exact bug.
+// Delivering the prompt on stdin removes the limit.
+func TestInvokePi_LargePromptExceedingArgMax(t *testing.T) {
+	stream := `{"type":"agent_end","messages":[{"role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input":1,"output":1}}]}`
+	bin, _ := fakePiCapture(t, stream)
+	s := &server{piBin: bin}
+
+	prompt := strings.Repeat("g", 300*1024) // 300KB, well over MAX_ARG_STRLEN
+	resp, err := s.invokePi(context.Background(), completeRequest{Prompt: prompt})
+	if err != nil {
+		t.Fatalf("large prompt must succeed via stdin, got: %v", err)
+	}
+	if resp.Text != "ok" {
+		t.Errorf("resp.Text = %q, want ok", resp.Text)
+	}
+}
+
 func TestInvokePi_HappyPath(t *testing.T) {
 	stream := `{"type":"agent_end","messages":[{"role":"assistant","content":[{"type":"text","text":"from-fake-pi"}],"usage":{"input":9,"output":2}}]}`
 	s := &server{piBin: fakePi(t, stream, false)}
