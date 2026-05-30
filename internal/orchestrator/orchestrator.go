@@ -21,11 +21,13 @@ import (
 	"github.com/vilosource/mykb-curator/internal/cache/runstate"
 	"github.com/vilosource/mykb-curator/internal/judge"
 	"github.com/vilosource/mykb-curator/internal/llm"
+	"github.com/vilosource/mykb-curator/internal/nav"
 	"github.com/vilosource/mykb-curator/internal/pipelines/maintenance"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/cluster"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/architecture"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/hub"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/passes"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/reconciler"
@@ -176,6 +178,12 @@ func (o *Orchestrator) Run(ctx context.Context) (reporter.Report, error) {
 		passPipeline = o.deps.BuildPasses(snap)
 	}
 
+	// Pull docspecs up front and build the nav map from EVERY spec's
+	// declared placement (both spec systems), so self-registering hubs
+	// (`members: auto`) can be filled before any hub renders.
+	docFiles := o.pullDocSpecs(ctx, rb)
+	navMap := buildNavMap(specList, docFiles)
+
 	for _, s := range specList {
 		if err := validateSpecForWiki(s, o.deps.Wiki); err != nil {
 			rb.AddSpecResult(reporter.SpecResult{
@@ -186,7 +194,15 @@ func (o *Orchestrator) Run(ctx context.Context) (reporter.Report, error) {
 			continue
 		}
 
-		if skip := o.diffDrivenSkip(ctx, s, snap); skip != nil {
+		// An auto hub's content depends on OTHER specs (its members),
+		// not its own file or kb — so it is exempt from diff-driven
+		// skipping and IR caching (both key only on this spec + kb).
+		// Always re-derive it from the current nav map.
+		auto := s.Hub != nil && s.Hub.Auto
+		if auto {
+			s = hub.ExpandAuto(s, navMap)
+			s.Hash = "" // bypass the IR cache (membership isn't in the key)
+		} else if skip := o.diffDrivenSkip(ctx, s, snap); skip != nil {
 			rb.AddSpecResult(*skip)
 			continue
 		}
@@ -194,7 +210,7 @@ func (o *Orchestrator) Run(ctx context.Context) (reporter.Report, error) {
 		rb.AddSpecResult(o.processSpec(ctx, s, snap, passPipeline))
 	}
 
-	o.runDocSpecs(ctx, snap, passPipeline, rb)
+	o.runDocSpecs(ctx, snap, passPipeline, rb, docFiles)
 
 	o.runMaintenance(ctx, snap, rb)
 
@@ -209,13 +225,8 @@ func (o *Orchestrator) Run(ctx context.Context) (reporter.Report, error) {
 //
 // Optional: absent DocSpecs/Cluster wiring is a silent no-op so
 // legacy-only deployments are unaffected.
-func (o *Orchestrator) runDocSpecs(ctx context.Context, snap kb.Snapshot, passPipeline *passes.Pipeline, rb *reporter.Builder) {
-	if o.deps.DocSpecs == nil || o.deps.Cluster == nil {
-		return
-	}
-	files, err := o.deps.DocSpecs.Pull(ctx)
-	if err != nil {
-		rb.AddError(fmt.Errorf("docspecs pull: %w", err))
+func (o *Orchestrator) runDocSpecs(ctx context.Context, snap kb.Snapshot, passPipeline *passes.Pipeline, rb *reporter.Builder, files []docspecs.File) {
+	if o.deps.Cluster == nil {
 		return
 	}
 	for _, f := range files {
@@ -659,6 +670,35 @@ func countBlocks(doc ir.Document) int {
 		n += len(sec.Blocks)
 	}
 	return n
+}
+
+// pullDocSpecs returns every doc-spec cluster file, or nil when the
+// docspec store isn't wired. A pull error is recorded (non-fatal) and
+// yields nil so the legacy path still runs.
+func (o *Orchestrator) pullDocSpecs(ctx context.Context, rb *reporter.Builder) []docspecs.File {
+	if o.deps.DocSpecs == nil {
+		return nil
+	}
+	files, err := o.deps.DocSpecs.Pull(ctx)
+	if err != nil {
+		rb.AddError(fmt.Errorf("docspecs pull: %w", err))
+		return nil
+	}
+	return files
+}
+
+// buildNavMap collects the declared placement of every page across
+// both spec systems (legacy specs + doc-spec cluster parents) and
+// resolves them into the hub-membership map that drives auto hubs.
+func buildNavMap(specList []specs.Spec, docFiles []docspecs.File) nav.Map {
+	pages := make([]nav.PageNav, 0, len(specList)+len(docFiles))
+	for _, s := range specList {
+		pages = append(pages, nav.PageNav{Page: s.Page, Nav: s.Nav})
+	}
+	for _, f := range docFiles {
+		pages = append(pages, nav.PageNav{Page: f.Spec.Parent.Page, Nav: f.Spec.Parent.Nav})
+	}
+	return nav.Build(pages)
 }
 
 // validateSpecForWiki enforces the frontmatter-as-guardrail rule:

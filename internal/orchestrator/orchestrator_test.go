@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vilosource/mykb-curator/internal/adapters/kb"
@@ -14,7 +15,10 @@ import (
 	"github.com/vilosource/mykb-curator/internal/cache/ircache"
 	"github.com/vilosource/mykb-curator/internal/cache/runstate"
 	"github.com/vilosource/mykb-curator/internal/llm"
+	"github.com/vilosource/mykb-curator/internal/nav"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends/markdown"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/hub"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
 	"github.com/vilosource/mykb-curator/internal/reporter"
 )
@@ -540,5 +544,41 @@ func TestRun_KBPullError_PropagatesAndReports(t *testing.T) {
 	}
 	if len(rep.Errors) != 1 {
 		t.Errorf("Errors = %v, want 1", rep.Errors)
+	}
+}
+
+// A `members: auto` hub is filled from the nav map: a member spec that
+// declares this hub as its nav.parent appears in the rendered hub,
+// without being hand-listed. Proves the orchestrator builds the nav
+// map across specs and expands auto hubs before render.
+func TestRun_AutoHub_FillsMembersFromNavMap(t *testing.T) {
+	reg := frontends.NewRegistry()
+	reg.Register(hub.New())      // real deterministic hub frontend
+	reg.Register(fakeFrontend{}) // kind=projection, renders the member page
+
+	target := memory.New("User:Bot")
+	o := New(Deps{
+		Wiki: "acme",
+		KB:   fakeKB{commit: "c1"},
+		Specs: fakeSpecs{items: []specs.Spec{
+			{ID: "h", Wiki: "acme", Page: "H", Kind: "hub",
+				Hub: &specs.HubSpec{Auto: true, Sections: []specs.HubSection{{Title: "Topics"}}}},
+			{ID: "m", Wiki: "acme", Page: "H/Member", Kind: "projection",
+				Nav: nav.Placement{Parent: "H", Section: "Topics", Label: "Member Page"}},
+		}},
+		WikiTarget: target,
+		Frontends:  reg,
+		Backend:    markdown.New(),
+	})
+
+	if _, err := o.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	page, err := target.GetPage(context.Background(), "H")
+	if err != nil || page == nil {
+		t.Fatalf("hub page H was not pushed: page=%v err=%v", page, err)
+	}
+	if !strings.Contains(page.Content, "H/Member") || !strings.Contains(page.Content, "Member Page") {
+		t.Errorf("auto hub did not auto-list the member; content:\n%s", page.Content)
 	}
 }
