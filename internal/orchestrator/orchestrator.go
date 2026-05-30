@@ -182,8 +182,8 @@ func (o *Orchestrator) Run(ctx context.Context) (reporter.Report, error) {
 	// declared placement (both spec systems), so self-registering hubs
 	// (`members: auto`) can be filled before any hub renders.
 	docFiles := o.pullDocSpecs(ctx, rb)
-	navMap := buildNavMap(specList, docFiles)
 	superseded := buildSupersedeMap(docFiles)
+	navMap := buildNavMap(specList, docFiles, superseded)
 
 	for _, s := range specList {
 		if err := validateSpecForWiki(s, o.deps.Wiki); err != nil {
@@ -752,9 +752,15 @@ func (o *Orchestrator) retireLeaf(ctx context.Context, s specs.Spec, canonical, 
 // buildNavMap collects the declared placement of every page across
 // both spec systems (legacy specs + doc-spec cluster parents) and
 // resolves them into the hub-membership map that drives auto hubs.
-func buildNavMap(specList []specs.Spec, docFiles []docspecs.File) nav.Map {
+// Superseded pages are excluded — they are retired to redirects, so
+// they must not also appear as hub members (the canonical page that
+// supersedes them carries the placement instead).
+func buildNavMap(specList []specs.Spec, docFiles []docspecs.File, superseded map[string]string) nav.Map {
 	pages := make([]nav.PageNav, 0, len(specList)+len(docFiles))
 	for _, s := range specList {
+		if _, retired := superseded[s.Page]; retired {
+			continue
+		}
 		pages = append(pages, nav.PageNav{Page: s.Page, Nav: s.Nav})
 	}
 	for _, f := range docFiles {

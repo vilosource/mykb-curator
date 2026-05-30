@@ -638,3 +638,13 @@ func TestRun_SupersededLeaf_BecomesRedirect(t *testing.T) {
 		t.Errorf("second run must skip (idempotent redirect); got %+v", leaf)
 	}
 }
+
+// A superseded leaf must not appear as a hub member (it's retired to a
+// redirect; the canonical page carries the placement).
+func TestBuildNavMap_ExcludesSuperseded(t *testing.T) {
+	specList := []specs.Spec{{Page: "A/Leaf", Kind: "projection"}}
+	m := buildNavMap(specList, nil, map[string]string{"A/Leaf": "Canonical"})
+	if len(m["A"]) != 0 {
+		t.Errorf("superseded leaf must be excluded from the nav map; got %+v", m["A"])
+	}
+}
