@@ -15,6 +15,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/vilosource/mykb-curator/internal/nav"
 )
 
 // Known enumerations. Kept here so validation is the single source
@@ -43,6 +45,11 @@ type DocPage struct {
 	Sources    []Source // page-level sources (simple pages without sections)
 	Related    []string
 	Categories []string
+
+	// Nav is the page's declared placement in the hub hierarchy (the
+	// `nav` block). Empty fields are resolved from the page title when
+	// the nav map is built (docs/navigation-DESIGN.md).
+	Nav nav.Placement
 }
 
 // DocSection is one ordered section of a page.
@@ -80,6 +87,16 @@ type pageYAML struct {
 	Sources    []string      `yaml:"sources"`
 	Related    []string      `yaml:"related"`
 	Categories []string      `yaml:"categories"`
+	Nav        navYAML       `yaml:"nav"`
+}
+
+// navYAML is the declared placement block (see internal/nav).
+type navYAML struct {
+	Parent  string `yaml:"parent"`
+	Section string `yaml:"section"`
+	Order   int    `yaml:"order"`
+	Label   string `yaml:"label"`
+	Blurb   string `yaml:"blurb"`
 }
 
 type sectionYAML struct {
@@ -124,6 +141,13 @@ func toPage(p pageYAML, where string) (DocPage, error) {
 		Intent:     strings.TrimSpace(p.Intent),
 		Related:    p.Related,
 		Categories: p.Categories,
+		Nav: nav.Placement{
+			Parent:  p.Nav.Parent,
+			Section: p.Nav.Section,
+			Order:   p.Nav.Order,
+			Label:   p.Nav.Label,
+			Blurb:   p.Nav.Blurb,
+		},
 	}
 	srcs, err := parseSources(p.Sources, where)
 	if err != nil {

@@ -108,3 +108,28 @@ func TestParse_SourceSchemes(t *testing.T) {
 		}
 	}
 }
+
+// A `nav` block on a doc-spec page parses into DocPage.Nav.
+func TestParse_NavPlacement(t *testing.T) {
+	doc := `topic: Vault
+parent:
+  page: Vault Architecture
+  kind: architecture
+  intent: Overview of Vault.
+  nav:
+    parent: OptiscanGroup/Azure_Infrastructure
+    section: Infrastructure Service Stacks
+    order: 40
+    label: Vault Architecture
+    blurb: The secrets backend, in depth.
+`
+	d, err := docspec.Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	n := d.Parent.Nav
+	if n.Parent != "OptiscanGroup/Azure_Infrastructure" || n.Section != "Infrastructure Service Stacks" ||
+		n.Order != 40 || n.Label != "Vault Architecture" || n.Blurb != "The secrets backend, in depth." {
+		t.Errorf("doc-spec nav not parsed: %+v", n)
+	}
+}

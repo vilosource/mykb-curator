@@ -227,3 +227,47 @@ func TestParse_RejectsMalformedFrontmatter(t *testing.T) {
 		t.Errorf("expected YAML parse error, got nil")
 	}
 }
+
+// A `nav` frontmatter block parses into Spec.Nav (declared placement;
+// resolution happens later when the nav map is built).
+func TestParse_NavPlacement(t *testing.T) {
+	body := `---
+wiki: personal
+page: OptiscanGroup/Azure_Infrastructure/Vault
+kind: projection
+nav:
+  parent: OptiscanGroup/Azure_Infrastructure
+  section: Infrastructure Service Stacks
+  order: 40
+  label: Vault & Secrets
+  blurb: The HashiCorp Vault secrets backend.
+---
+body`
+	spec, err := Parse("leaf-vault.spec.md", []byte(body))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	n := spec.Nav
+	if n.Parent != "OptiscanGroup/Azure_Infrastructure" || n.Section != "Infrastructure Service Stacks" ||
+		n.Order != 40 || n.Label != "Vault & Secrets" || n.Blurb != "The HashiCorp Vault secrets backend." {
+		t.Errorf("nav not parsed: %+v", n)
+	}
+}
+
+// A spec with no `nav` block yields a zero placement (resolved from the
+// title later).
+func TestParse_NoNavIsZero(t *testing.T) {
+	body := `---
+wiki: personal
+page: Some/Page
+kind: projection
+---
+body`
+	spec, err := Parse("x.spec.md", []byte(body))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if spec.Nav.Parent != "" || spec.Nav.Label != "" || spec.Nav.Order != 0 {
+		t.Errorf("absent nav should be zero, got %+v", spec.Nav)
+	}
+}

@@ -3,7 +3,11 @@
 // s3, local).
 package specs
 
-import "context"
+import (
+	"context"
+
+	"github.com/vilosource/mykb-curator/internal/nav"
+)
 
 // Store fetches specs for a wiki tenant.
 type Store interface {
@@ -51,6 +55,12 @@ type Spec struct {
 	// otherwise). Drives the deterministic hub frontend — the
 	// navigation backbone of progressive-disclosure wikis.
 	Hub *HubSpec
+
+	// Nav is the page's declared placement in the hub hierarchy (the
+	// `nav` frontmatter block). Empty fields are resolved from the
+	// page title (subpath) when the nav map is built. Drives
+	// auto-derived, self-registering hubs (docs/navigation-DESIGN.md).
+	Nav nav.Placement
 }
 
 // HubSpec is the declared structure of an index/hub page: ordered

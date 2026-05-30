@@ -34,6 +34,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/vilosource/mykb-curator/internal/adapters/specs"
+	"github.com/vilosource/mykb-curator/internal/nav"
 )
 
 // knownKinds enumerates the frontend kinds this parser accepts.
@@ -56,6 +57,16 @@ type frontmatter struct {
 	FactCheck       map[string]string `yaml:"fact_check"`
 	ProtectedBlocks []string          `yaml:"protected_blocks"`
 	Hub             *hubYAML          `yaml:"hub"`
+	Nav             navYAML           `yaml:"nav"`
+}
+
+// navYAML is the declared placement block (see internal/nav).
+type navYAML struct {
+	Parent  string `yaml:"parent"`
+	Section string `yaml:"section"`
+	Order   int    `yaml:"order"`
+	Label   string `yaml:"label"`
+	Blurb   string `yaml:"blurb"`
 }
 
 type hubYAML struct {
@@ -135,8 +146,15 @@ func Parse(id string, content []byte) (specs.Spec, error) {
 		},
 		FactCheck: f.FactCheck,
 		Hub:       toHubSpec(f.Hub),
-		Body:      string(body),
-		Hash:      hashContent(content),
+		Nav: nav.Placement{
+			Parent:  f.Nav.Parent,
+			Section: f.Nav.Section,
+			Order:   f.Nav.Order,
+			Label:   f.Nav.Label,
+			Blurb:   f.Nav.Blurb,
+		},
+		Body: string(body),
+		Hash: hashContent(content),
 	}, nil
 }
 
