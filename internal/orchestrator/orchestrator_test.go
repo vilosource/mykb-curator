@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vilosource/mykb-curator/internal/adapters/docspecs"
 	"github.com/vilosource/mykb-curator/internal/adapters/kb"
 	"github.com/vilosource/mykb-curator/internal/adapters/specs"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki"
@@ -21,6 +22,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/hub"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
 	"github.com/vilosource/mykb-curator/internal/reporter"
+	"github.com/vilosource/mykb-curator/internal/specs/docspec"
 )
 
 // fakeKB returns a fixed snapshot.
@@ -580,5 +582,59 @@ func TestRun_AutoHub_FillsMembersFromNavMap(t *testing.T) {
 	}
 	if !strings.Contains(page.Content, "H/Member") || !strings.Contains(page.Content, "Member Page") {
 		t.Errorf("auto hub did not auto-list the member; content:\n%s", page.Content)
+	}
+}
+
+// A leaf page listed in a cluster parent's `supersedes:` is retired —
+// its page becomes a #REDIRECT to the canonical page instead of its
+// projection — and the retirement is idempotent (second run skips).
+func TestRun_SupersededLeaf_BecomesRedirect(t *testing.T) {
+	dir := t.TempDir()
+	rs, err := runstate.Open(filepath.Join(dir, "rs.bolt"))
+	if err != nil {
+		t.Fatalf("runstate: %v", err)
+	}
+	defer func() { _ = rs.Close() }()
+
+	reg := frontends.NewRegistry()
+	reg.Register(fakeFrontend{}) // kind=projection, for the leaf
+	target := memory.New("User:Bot")
+	docs := fakeDocSpecs{files: []docspecs.File{{ID: "vault.doc.yaml", Spec: docspec.DocSpec{
+		Topic: "Vault",
+		Parent: docspec.DocPage{Page: "Vault Architecture", Kind: "architecture",
+			Supersedes: []string{"OptiscanGroup/Azure_Infrastructure/Vault_Architecture"}},
+	}}}}
+	build := func() *Orchestrator {
+		return New(Deps{
+			Wiki: "acme",
+			KB:   fakeKB{commit: "c1"},
+			Specs: fakeSpecs{items: []specs.Spec{
+				{ID: "leaf-vault", Wiki: "acme", Page: "OptiscanGroup/Azure_Infrastructure/Vault_Architecture", Kind: "projection"},
+			}},
+			DocSpecs:   docs,
+			WikiTarget: target,
+			Frontends:  reg,
+			Backend:    markdown.New(),
+			RunState:   rs,
+		})
+	}
+
+	if _, err := build().Run(context.Background()); err != nil {
+		t.Fatalf("Run 1: %v", err)
+	}
+	page, _ := target.GetPage(context.Background(), "OptiscanGroup/Azure_Infrastructure/Vault_Architecture")
+	if page == nil || !strings.Contains(page.Content, "#REDIRECT [[Vault Architecture]]") {
+		t.Fatalf("leaf not retired to a redirect; content=%v", page)
+	}
+
+	rep2, _ := build().Run(context.Background())
+	var leaf *reporter.SpecResult
+	for i := range rep2.Specs {
+		if rep2.Specs[i].ID == "leaf-vault" {
+			leaf = &rep2.Specs[i]
+		}
+	}
+	if leaf == nil || leaf.Status != reporter.StatusSkipped {
+		t.Errorf("second run must skip (idempotent redirect); got %+v", leaf)
 	}
 }

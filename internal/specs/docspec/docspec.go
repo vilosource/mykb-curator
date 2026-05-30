@@ -50,6 +50,12 @@ type DocPage struct {
 	// `nav` block). Empty fields are resolved from the page title when
 	// the nav map is built (docs/navigation-DESIGN.md).
 	Nav nav.Placement
+
+	// Supersedes lists leaf page titles this page replaces. The curator
+	// renders each superseded page as a #REDIRECT to this page instead
+	// of its own projection — one canonical page per topic (precise:
+	// explicit titles, never "any shared area").
+	Supersedes []string
 }
 
 // DocSection is one ordered section of a page.
@@ -88,6 +94,7 @@ type pageYAML struct {
 	Related    []string      `yaml:"related"`
 	Categories []string      `yaml:"categories"`
 	Nav        navYAML       `yaml:"nav"`
+	Supersedes []string      `yaml:"supersedes"`
 }
 
 // navYAML is the declared placement block (see internal/nav).
@@ -150,6 +157,7 @@ func toPage(p pageYAML, where string) (DocPage, error) {
 			Blurb:   p.Nav.Blurb,
 			Area:    p.Nav.Area,
 		},
+		Supersedes: p.Supersedes,
 	}
 	srcs, err := parseSources(p.Sources, where)
 	if err != nil {

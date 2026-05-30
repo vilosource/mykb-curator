@@ -183,6 +183,7 @@ func (o *Orchestrator) Run(ctx context.Context) (reporter.Report, error) {
 	// (`members: auto`) can be filled before any hub renders.
 	docFiles := o.pullDocSpecs(ctx, rb)
 	navMap := buildNavMap(specList, docFiles)
+	superseded := buildSupersedeMap(docFiles)
 
 	for _, s := range specList {
 		if err := validateSpecForWiki(s, o.deps.Wiki); err != nil {
@@ -191,6 +192,14 @@ func (o *Orchestrator) Run(ctx context.Context) (reporter.Report, error) {
 				Status: reporter.StatusFailed,
 				Reason: err.Error(),
 			})
+			continue
+		}
+
+		// A superseded leaf is retired: its page becomes a #REDIRECT to
+		// the canonical (cluster) page instead of its own projection.
+		// Always run (no diff-skip) so the redirect stays in place.
+		if canonical, ok := superseded[s.Page]; ok {
+			rb.AddSpecResult(o.retireLeaf(ctx, s, canonical, snap.Commit))
 			continue
 		}
 
@@ -685,6 +694,59 @@ func (o *Orchestrator) pullDocSpecs(ctx context.Context, rb *reporter.Builder) [
 		return nil
 	}
 	return files
+}
+
+// buildSupersedeMap maps each superseded leaf page title to the
+// canonical (cluster parent) page that replaces it. Precise: only
+// pages explicitly listed in a parent's `supersedes:` — never derived
+// from shared kb areas.
+func buildSupersedeMap(docFiles []docspecs.File) map[string]string {
+	m := map[string]string{}
+	for _, f := range docFiles {
+		for _, leaf := range f.Spec.Parent.Supersedes {
+			if leaf != "" {
+				m[leaf] = f.Spec.Parent.Page
+			}
+		}
+	}
+	return m
+}
+
+// retireLeaf replaces a superseded leaf page with a #REDIRECT to the
+// canonical page. Idempotent (skips when already the right redirect)
+// and honours the soft-read-only contract (won't clobber a
+// human-edited leaf). Bypasses the block reconciler — a redirect must
+// be the whole page, not a merged block.
+func (o *Orchestrator) retireLeaf(ctx context.Context, s specs.Spec, canonical, kbCommit string) reporter.SpecResult {
+	if o.deps.WikiTarget == nil || s.Page == "" {
+		return reporter.SpecResult{ID: s.ID, Status: reporter.StatusSkipped, Reason: "no wiki target"}
+	}
+	desired := fmt.Sprintf("#REDIRECT [[%s]]\n", canonical)
+
+	current, err := o.deps.WikiTarget.GetPage(ctx, s.Page)
+	if err != nil {
+		return reporter.SpecResult{ID: s.ID, Status: reporter.StatusFailed, Reason: fmt.Errorf("retire: get %q: %w", s.Page, err).Error()}
+	}
+	if current != nil && current.Content == desired {
+		o.persistRunState(s.ID, o.lookupLastBotRev(s.ID), kbCommit)
+		return reporter.SpecResult{ID: s.ID, Status: reporter.StatusSkipped, Reason: fmt.Sprintf("already redirects to %q", canonical)}
+	}
+
+	// Soft-read-only: don't redirect over a human-edited leaf.
+	if current != nil && o.deps.WikiTarget != nil {
+		if last := o.lookupLastBotRev(s.ID); last != "" {
+			if he, herr := o.deps.WikiTarget.HumanEditsSinceBot(ctx, s.Page, last); herr == nil && he != nil {
+				return reporter.SpecResult{ID: s.ID, Status: reporter.StatusSkipped, Reason: fmt.Sprintf("human edits since last bot rev; not retiring %q", s.Page)}
+			}
+		}
+	}
+
+	rev, err := o.deps.WikiTarget.UpsertPage(ctx, s.Page, desired, fmt.Sprintf("mykb-curator: retire %s → redirect to %s", s.ID, canonical))
+	if err != nil {
+		return reporter.SpecResult{ID: s.ID, Status: reporter.StatusFailed, Reason: fmt.Errorf("retire upsert %q: %w", s.Page, err).Error()}
+	}
+	o.persistRunState(s.ID, rev.ID, kbCommit)
+	return reporter.SpecResult{ID: s.ID, Status: reporter.StatusRendered, NewRevisionID: rev.ID, Reason: fmt.Sprintf("retired → redirect to %q", canonical)}
 }
 
 // buildNavMap collects the declared placement of every page across

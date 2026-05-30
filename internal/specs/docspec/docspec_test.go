@@ -133,3 +133,22 @@ parent:
 		t.Errorf("doc-spec nav not parsed: %+v", n)
 	}
 }
+
+// `supersedes:` on a cluster parent parses into DocPage.Supersedes.
+func TestParse_Supersedes(t *testing.T) {
+	doc := `topic: Vault
+parent:
+  page: Vault Architecture
+  kind: architecture
+  intent: Deep Vault treatment.
+  supersedes:
+    - OptiscanGroup/Azure_Infrastructure/Vault_Architecture
+`
+	d, err := docspec.Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(d.Parent.Supersedes) != 1 || d.Parent.Supersedes[0] != "OptiscanGroup/Azure_Infrastructure/Vault_Architecture" {
+		t.Errorf("supersedes not parsed: %+v", d.Parent.Supersedes)
+	}
+}
