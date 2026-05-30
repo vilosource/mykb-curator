@@ -70,6 +70,7 @@ type navYAML struct {
 }
 
 type hubYAML struct {
+	Members  string `yaml:"members"` // "auto" => membership auto-derived from nav.parent
 	Sections []struct {
 		Title string `yaml:"title"`
 		Desc  string `yaml:"desc"`
@@ -164,7 +165,7 @@ func toHubSpec(h *hubYAML) *specs.HubSpec {
 	if h == nil {
 		return nil
 	}
-	hs := &specs.HubSpec{}
+	hs := &specs.HubSpec{Auto: h.Members == "auto"}
 	for _, sec := range h.Sections {
 		s := specs.HubSection{Title: sec.Title, Desc: sec.Desc}
 		for _, l := range sec.Links {

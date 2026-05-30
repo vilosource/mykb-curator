@@ -67,6 +67,13 @@ type Spec struct {
 // sections, each an ordered list of internal links.
 type HubSpec struct {
 	Sections []HubSection
+
+	// Auto, when true (`members: auto`), means the hub's membership is
+	// NOT hand-listed in Links — it is auto-derived from the pages that
+	// declare this hub as their nav.parent. Sections still declare
+	// section ORDER + intro; the orchestrator fills their Links from
+	// the nav map before rendering (docs/navigation-DESIGN.md).
+	Auto bool
 }
 
 // HubSection is one labelled group of links on a hub page.
