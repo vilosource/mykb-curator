@@ -228,7 +228,7 @@ func (o *Orchestrator) Run(ctx context.Context) (reporter.Report, error) {
 
 	o.runDocSpecs(ctx, snap, passPipeline, rb, docFiles)
 
-	o.pruneOrphans(rb, ownedPages(specList, docFiles), docOK)
+	o.pruneOrphans(ctx, rb, ownedPages(specList, docFiles), docOK)
 
 	o.runMaintenance(ctx, snap, rb)
 
@@ -738,7 +738,7 @@ func ownedPages(specList []specs.Spec, docFiles []docspecs.File) map[string]bool
 // pulls succeeded (ok) and the owned set is non-empty (an empty set
 // against a populated manifest signals a load failure, not mass
 // deletion). Report-only for now — retirement is a follow-on.
-func (o *Orchestrator) pruneOrphans(rb *reporter.Builder, owned map[string]bool, ok bool) {
+func (o *Orchestrator) pruneOrphans(ctx context.Context, rb *reporter.Builder, owned map[string]bool, ok bool) {
 	if o.deps.Manifest == nil || !ok || len(owned) == 0 {
 		return
 	}
@@ -748,13 +748,57 @@ func (o *Orchestrator) pruneOrphans(rb *reporter.Builder, owned map[string]bool,
 		return
 	}
 	for page := range before {
-		if !owned[page] {
-			rb.AddWarning(fmt.Sprintf("orphan: page %q is no longer produced by any spec (spec removed/renamed) — report-only, not retired", page))
+		if owned[page] {
+			continue
 		}
+		parent := nav.SubpathParent(page)
+		if parent == "" {
+			// No obvious redirect target for a flat orphan — surface it
+			// for the operator rather than guess (design §11 fallback).
+			rb.AddWarning(fmt.Sprintf("orphan: page %q is no longer produced by any spec and has no parent to redirect to — left in place", page))
+			continue
+		}
+		o.retireOrphan(ctx, rb, page, parent)
 	}
 	if err := o.deps.Manifest.Save(owned); err != nil {
 		rb.AddWarning("orphan-pruning: save manifest: " + err.Error())
 	}
+}
+
+// retireOrphan redirects an orphaned page to its parent hub, but only
+// if it still looks curator-owned (don't clobber a page a human took
+// over) and isn't already that redirect (idempotent).
+func (o *Orchestrator) retireOrphan(ctx context.Context, rb *reporter.Builder, page, parent string) {
+	if o.deps.WikiTarget == nil {
+		return
+	}
+	desired := fmt.Sprintf("#REDIRECT [[%s]]\n", parent)
+	current, err := o.deps.WikiTarget.GetPage(ctx, page)
+	if err != nil {
+		rb.AddWarning(fmt.Sprintf("orphan-pruning: get %q: %v", page, err))
+		return
+	}
+	if current == nil || current.Content == desired {
+		return // already gone, or already the redirect
+	}
+	if !looksCuratorOwned(current.Content) {
+		rb.AddWarning(fmt.Sprintf("orphan %q looks human-edited — left in place, not retired", page))
+		return
+	}
+	if _, err := o.deps.WikiTarget.UpsertPage(ctx, page, desired, fmt.Sprintf("mykb-curator: retire orphan → redirect to %s", parent)); err != nil {
+		rb.AddWarning(fmt.Sprintf("orphan-pruning: upsert %q: %v", page, err))
+		return
+	}
+	rb.AddWarning(fmt.Sprintf("orphan: retired %q → redirect to %q (spec removed/renamed)", page, parent))
+}
+
+// looksCuratorOwned reports whether page content was produced by the
+// curator (CURATOR markers or the spec-hash header) or is already a
+// redirect — i.e. safe to overwrite with a retirement redirect.
+func looksCuratorOwned(content string) bool {
+	return strings.Contains(content, "CURATOR:") ||
+		strings.Contains(content, "mykb-curator") ||
+		strings.HasPrefix(strings.TrimSpace(content), "#REDIRECT")
 }
 
 // buildNavMap collects the declared placement of every page across

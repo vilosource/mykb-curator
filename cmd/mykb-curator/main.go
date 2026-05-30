@@ -299,7 +299,7 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 		Backend:       composeBackend(cfg),
 		OnRendered:    onRendered,
 		RunState:      cache,
-		Manifest:      manifest.Open(manifestPath(cfg)),
+		Manifest:      orphanManifest(cfg),
 		IRCache:       irCache,
 		Maintenance:   maintPipeline,
 		OnMaintenance: onMaint,
@@ -752,14 +752,19 @@ func composeIRCache(cfg *config.Config) (*ircache.Cache, error) {
 // composeRunStateCache opens the per-wiki bbolt cache. Returns a
 // nil cache (and nil closer) when no cache dir is configured —
 // orchestrator handles nil RunState gracefully (first-render mode).
-// manifestPath returns the page-ownership manifest path, co-located
-// with the run-state cache under the wiki's cache dir.
-func manifestPath(cfg *config.Config) string {
+// orphanManifest returns the page-ownership manifest store ONLY when
+// orphan-pruning is enabled (the canonical full-store run). Returns nil
+// otherwise so scoped/subset runs never prune — a scope would wrongly
+// retire every out-of-scope page.
+func orphanManifest(cfg *config.Config) *manifest.Store {
+	if !cfg.OrphanPruning {
+		return nil
+	}
 	base := cfg.CacheDir
 	if base == "" {
 		base = filepath.Join(os.Getenv("HOME"), ".cache", "mykb-curator", cfg.Wiki)
 	}
-	return filepath.Join(base, "page-manifest.json")
+	return manifest.Open(filepath.Join(base, "page-manifest.json"))
 }
 
 func composeRunStateCache(cfg *config.Config) (*runstate.Cache, func(), error) {

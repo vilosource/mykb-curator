@@ -691,3 +691,42 @@ func TestRun_OrphanDetection_ReportsRemovedPage(t *testing.T) {
 		t.Errorf("manifest should now hold only currently-owned pages; got %+v", now)
 	}
 }
+
+// A subpaged orphan that still looks curator-owned is retired to a
+// redirect to its parent hub; a human-edited orphan is left in place.
+func TestRun_OrphanRetire_RedirectsSubpagedToParent(t *testing.T) {
+	target := memory.New("User:Bot")
+	// Seed two pages from a "previous run": one curator-owned, one human.
+	if _, err := target.UpsertPage(context.Background(), "OptiscanGroup/Azure_Infrastructure/Removed", "<!-- CURATOR:BEGIN -->old<!-- CURATOR:END -->", "seed"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := target.UpsertPage(context.Background(), "OptiscanGroup/Azure_Infrastructure/HumanOwned", "a human wrote this", "seed"); err != nil {
+		t.Fatal(err)
+	}
+	man := manifest.Open(filepath.Join(t.TempDir(), "m.json"))
+	_ = man.Save(map[string]bool{
+		"OptiscanGroup/Azure_Infrastructure/Removed":    true,
+		"OptiscanGroup/Azure_Infrastructure/HumanOwned": true,
+		"PageA": true,
+	})
+
+	reg := frontends.NewRegistry()
+	reg.Register(fakeFrontend{})
+	o := New(Deps{
+		Wiki: "acme", KB: fakeKB{commit: "c1"},
+		Specs:      fakeSpecs{items: []specs.Spec{{ID: "a", Wiki: "acme", Page: "PageA", Kind: "projection"}}},
+		WikiTarget: target, Frontends: reg, Backend: markdown.New(), Manifest: man,
+	})
+	if _, err := o.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	removed, _ := target.GetPage(context.Background(), "OptiscanGroup/Azure_Infrastructure/Removed")
+	if removed == nil || removed.Content != "#REDIRECT [[OptiscanGroup/Azure_Infrastructure]]\n" {
+		t.Errorf("curator-owned orphan must be retired to a redirect; got %q", removed.Content)
+	}
+	human, _ := target.GetPage(context.Background(), "OptiscanGroup/Azure_Infrastructure/HumanOwned")
+	if human == nil || human.Content != "a human wrote this" {
+		t.Errorf("human-edited orphan must be left in place; got %q", human.Content)
+	}
+}

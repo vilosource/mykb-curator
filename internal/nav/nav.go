@@ -49,6 +49,11 @@ func Resolve(page string, declared Placement) Placement {
 	return out
 }
 
+// SubpathParent returns the parent path of a MediaWiki subpage title
+// ("A/B/C" → "A/B"); a title with no "/" has no parent (""). Exposed
+// for orphan-pruning, which redirects an orphan to its parent hub.
+func SubpathParent(title string) string { return subpathParent(title) }
+
 // subpathParent returns the parent path of a MediaWiki subpage title
 // ("A/B/C" → "A/B"); a title with no "/" has no parent ("").
 func subpathParent(title string) string {

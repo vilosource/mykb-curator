@@ -24,6 +24,13 @@ type Config struct {
 	Sinks       SinksConfig       `yaml:"report_sinks"`
 	Sources     SourcesConfig     `yaml:"sources"`
 	Judge       JudgeConfig       `yaml:"judge"`
+
+	// OrphanPruning enables retiring pages whose spec was removed or
+	// renamed (docs/navigation-DESIGN.md §11). MUST stay off for scoped
+	// runs — a scope is a subset of specs, so pruning there would
+	// wrongly retire every out-of-scope page. Enable only on the
+	// canonical full-store run.
+	OrphanPruning bool `yaml:"orphan_pruning"`
 }
 
 // JudgeConfig governs the output Judge and its closed refinement loop
