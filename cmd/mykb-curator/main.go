@@ -39,6 +39,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki/mediawiki"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki/memory"
 	"github.com/vilosource/mykb-curator/internal/cache/ircache"
+	"github.com/vilosource/mykb-curator/internal/cache/manifest"
 	"github.com/vilosource/mykb-curator/internal/cache/runstate"
 	"github.com/vilosource/mykb-curator/internal/config"
 	"github.com/vilosource/mykb-curator/internal/judge"
@@ -298,6 +299,7 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 		Backend:       composeBackend(cfg),
 		OnRendered:    onRendered,
 		RunState:      cache,
+		Manifest:      manifest.Open(manifestPath(cfg)),
 		IRCache:       irCache,
 		Maintenance:   maintPipeline,
 		OnMaintenance: onMaint,
@@ -750,6 +752,16 @@ func composeIRCache(cfg *config.Config) (*ircache.Cache, error) {
 // composeRunStateCache opens the per-wiki bbolt cache. Returns a
 // nil cache (and nil closer) when no cache dir is configured —
 // orchestrator handles nil RunState gracefully (first-render mode).
+// manifestPath returns the page-ownership manifest path, co-located
+// with the run-state cache under the wiki's cache dir.
+func manifestPath(cfg *config.Config) string {
+	base := cfg.CacheDir
+	if base == "" {
+		base = filepath.Join(os.Getenv("HOME"), ".cache", "mykb-curator", cfg.Wiki)
+	}
+	return filepath.Join(base, "page-manifest.json")
+}
+
 func composeRunStateCache(cfg *config.Config) (*runstate.Cache, func(), error) {
 	cacheDir := cfg.CacheDir
 	if cacheDir == "" {

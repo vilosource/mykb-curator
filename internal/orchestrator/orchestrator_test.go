@@ -14,6 +14,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki/memory"
 	"github.com/vilosource/mykb-curator/internal/cache/ircache"
+	"github.com/vilosource/mykb-curator/internal/cache/manifest"
 	"github.com/vilosource/mykb-curator/internal/cache/runstate"
 	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/nav"
@@ -646,5 +647,47 @@ func TestBuildNavMap_ExcludesSuperseded(t *testing.T) {
 	m := buildNavMap(specList, nil, map[string]string{"A/Leaf": "Canonical"})
 	if len(m["A"]) != 0 {
 		t.Errorf("superseded leaf must be excluded from the nav map; got %+v", m["A"])
+	}
+}
+
+// Orphan detection (report-only): a page in the prior manifest that no
+// spec produces this run is reported as an orphan, and the manifest is
+// updated to the currently-owned set.
+func TestRun_OrphanDetection_ReportsRemovedPage(t *testing.T) {
+	man := manifest.Open(filepath.Join(t.TempDir(), "m.json"))
+	if err := man.Save(map[string]bool{"OldPage": true, "PageA": true}); err != nil {
+		t.Fatalf("seed manifest: %v", err)
+	}
+
+	reg := frontends.NewRegistry()
+	reg.Register(fakeFrontend{})
+	o := New(Deps{
+		Wiki: "acme",
+		KB:   fakeKB{commit: "c1"},
+		Specs: fakeSpecs{items: []specs.Spec{
+			{ID: "a", Wiki: "acme", Page: "PageA", Kind: "projection"},
+		}},
+		WikiTarget: fakeWiki{},
+		Frontends:  reg,
+		Backend:    markdown.New(),
+		Manifest:   man,
+	})
+
+	rep, err := o.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var orphaned bool
+	for _, w := range rep.Warnings {
+		if strings.Contains(w, "OldPage") {
+			orphaned = true
+		}
+	}
+	if !orphaned {
+		t.Errorf("expected an orphan warning for OldPage; warnings=%v", rep.Warnings)
+	}
+	now, _ := man.Load()
+	if now["OldPage"] || !now["PageA"] {
+		t.Errorf("manifest should now hold only currently-owned pages; got %+v", now)
 	}
 }

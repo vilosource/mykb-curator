@@ -18,6 +18,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/adapters/specs"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki"
 	"github.com/vilosource/mykb-curator/internal/cache/ircache"
+	"github.com/vilosource/mykb-curator/internal/cache/manifest"
 	"github.com/vilosource/mykb-curator/internal/cache/runstate"
 	"github.com/vilosource/mykb-curator/internal/judge"
 	"github.com/vilosource/mykb-curator/internal/llm"
@@ -93,6 +94,12 @@ type Deps struct {
 	// Especially valuable for LLM-driven editorial frontends.
 	// Nil = always run the frontend.
 	IRCache *ircache.Cache
+
+	// Manifest persists the set of pages the curator owns, enabling
+	// orphan detection (a previously-owned page no longer produced by
+	// any spec). Nil disables orphan-pruning (docs/navigation-DESIGN.md
+	// §11).
+	Manifest *manifest.Store
 
 	// PipelineVersion is included in the IR cache key. Bump it
 	// whenever frontend/pass output behaviour changes so cached IR
@@ -181,7 +188,7 @@ func (o *Orchestrator) Run(ctx context.Context) (reporter.Report, error) {
 	// Pull docspecs up front and build the nav map from EVERY spec's
 	// declared placement (both spec systems), so self-registering hubs
 	// (`members: auto`) can be filled before any hub renders.
-	docFiles := o.pullDocSpecs(ctx, rb)
+	docFiles, docOK := o.pullDocSpecs(ctx, rb)
 	superseded := buildSupersedeMap(docFiles)
 	navMap := buildNavMap(specList, docFiles, superseded)
 
@@ -220,6 +227,8 @@ func (o *Orchestrator) Run(ctx context.Context) (reporter.Report, error) {
 	}
 
 	o.runDocSpecs(ctx, snap, passPipeline, rb, docFiles)
+
+	o.pruneOrphans(rb, ownedPages(specList, docFiles), docOK)
 
 	o.runMaintenance(ctx, snap, rb)
 
@@ -684,17 +693,71 @@ func countBlocks(doc ir.Document) int {
 // pullDocSpecs returns every doc-spec cluster file, or nil when the
 // docspec store isn't wired. A pull error is recorded (non-fatal) and
 // yields nil so the legacy path still runs.
-func (o *Orchestrator) pullDocSpecs(ctx context.Context, rb *reporter.Builder) []docspecs.File {
+func (o *Orchestrator) pullDocSpecs(ctx context.Context, rb *reporter.Builder) ([]docspecs.File, bool) {
 	if o.deps.DocSpecs == nil {
-		return nil
+		return nil, true // no docspec store wired — legitimately zero files
 	}
 	files, err := o.deps.DocSpecs.Pull(ctx)
 	if err != nil {
 		rb.AddError(fmt.Errorf("docspecs pull: %w", err))
-		return nil
+		return nil, false // pull failed — caller must not prune on a partial view
 	}
-	return files
+	return files, true
 }
+
+// ownedPages is the set of wiki pages the curator's specs target this
+// run: every legacy spec page plus every doc-spec cluster page (parent
+// + children). Superseded leaves are included (still owned, as
+// redirects). This is the inventory orphan-pruning persists + diffs.
+func ownedPages(specList []specs.Spec, docFiles []docspecs.File) map[string]bool {
+	m := map[string]bool{}
+	for _, s := range specList {
+		if s.Page != "" {
+			m[s.Page] = true
+		}
+	}
+	for _, f := range docFiles {
+		if f.Spec.Parent.Page != "" {
+			m[f.Spec.Parent.Page] = true
+		}
+		for _, c := range f.Spec.Children {
+			if c.Page != "" {
+				m[c.Page] = true
+			}
+		}
+	}
+	return m
+}
+
+// pruneOrphans (report-only) diffs the prior page-ownership manifest
+// against the pages owned this run and warns about each orphan — a
+// page the curator produced before but no longer does (its spec was
+// removed/renamed). It then persists the current owned set.
+//
+// Guards against false positives: skips entirely unless the spec
+// pulls succeeded (ok) and the owned set is non-empty (an empty set
+// against a populated manifest signals a load failure, not mass
+// deletion). Report-only for now — retirement is a follow-on.
+func (o *Orchestrator) pruneOrphans(rb *reporter.Builder, owned map[string]bool, ok bool) {
+	if o.deps.Manifest == nil || !ok || len(owned) == 0 {
+		return
+	}
+	before, err := o.deps.Manifest.Load()
+	if err != nil {
+		rb.AddWarning("orphan-pruning: load manifest: " + err.Error())
+		return
+	}
+	for page := range before {
+		if !owned[page] {
+			rb.AddWarning(fmt.Sprintf("orphan: page %q is no longer produced by any spec (spec removed/renamed) — report-only, not retired", page))
+		}
+	}
+	if err := o.deps.Manifest.Save(owned); err != nil {
+		rb.AddWarning("orphan-pruning: save manifest: " + err.Error())
+	}
+}
+
+// buildNavMap collects the declared placement of every page across
 
 // buildSupersedeMap maps each superseded leaf page title to the
 // canonical (cluster parent) page that replaces it. Precise: only
