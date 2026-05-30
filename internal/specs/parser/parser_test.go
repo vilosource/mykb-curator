@@ -271,3 +271,35 @@ body`
 		t.Errorf("absent nav should be zero, got %+v", spec.Nav)
 	}
 }
+
+// A members:auto hub may declare sections with no links (membership is
+// auto-derived) — validation must accept it, where a non-auto hub with
+// an empty-link section still fails.
+func TestParse_AutoHubAllowsEmptySections(t *testing.T) {
+	auto := `---
+wiki: personal
+page: OptiscanGroup/Azure_Infrastructure
+kind: hub
+hub:
+  members: auto
+  sections:
+    - {title: Core, desc: "the base"}
+---
+body`
+	if _, err := Parse("azi.spec.md", []byte(auto)); err != nil {
+		t.Errorf("members:auto hub with link-less sections must parse, got: %v", err)
+	}
+
+	notAuto := `---
+wiki: personal
+page: H
+kind: hub
+hub:
+  sections:
+    - {title: Core}
+---
+body`
+	if _, err := Parse("h.spec.md", []byte(notAuto)); err == nil {
+		t.Errorf("non-auto hub with a link-less section must still fail")
+	}
+}

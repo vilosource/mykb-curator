@@ -227,11 +227,19 @@ func validateFrontmatter(f *frontmatter) error {
 		return fmt.Errorf("kind: %q unknown (known: projection, editorial, hub, runbook)", f.Kind)
 	}
 	if f.Kind == "hub" {
-		if f.Hub == nil || len(f.Hub.Sections) == 0 {
-			return fmt.Errorf("hub: kind=hub requires a non-empty hub.sections")
+		if f.Hub == nil {
+			return fmt.Errorf("hub: kind=hub requires a hub block")
+		}
+		// An auto hub (`members: auto`) derives its membership from
+		// other specs' nav.parent, so its sections declare order +
+		// intro only — empty Links is expected, and zero sections is
+		// valid (all members fall to a default group).
+		auto := f.Hub.Members == "auto"
+		if !auto && len(f.Hub.Sections) == 0 {
+			return fmt.Errorf("hub: kind=hub requires a non-empty hub.sections (or members: auto)")
 		}
 		for i, s := range f.Hub.Sections {
-			if len(s.Links) == 0 {
+			if !auto && len(s.Links) == 0 {
 				return fmt.Errorf("hub.sections[%d] (%q): has no links", i, s.Title)
 			}
 			for j, l := range s.Links {
