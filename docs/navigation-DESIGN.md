@@ -353,8 +353,15 @@ error would wrongly retire a live page. This guard is load-bearing.
 idempotent (skip when already retired); the manifest update is the
 record of what's now owned.
 
-**Status:** designed, not built. The retire mechanism (§3.4) already
-exists; orphan-pruning adds the inventory + absence-detection on top.
+**Status: BUILT + live-verified (2026-05-30).** `internal/cache/manifest`
+page-ownership store; detection (`pruneOrphans`) + retire
+(`retireOrphan` → redirect to subpath parent, looks-curator-owned +
+idempotent guards; flat orphans report-only). **Opt-in via the
+`orphan_pruning` config flag** — OFF by default, ON only on the
+canonical full-store run, because scoped runs share the per-wiki
+manifest and would otherwise mass-retire out-of-scope pages. A full
+personal.yaml run with it active produced zero false orphans and a
+correct 37-page manifest. Commits b98fead (detect) + 4eda8de (retire).
 
 ---
 
