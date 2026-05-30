@@ -25,6 +25,12 @@ type Placement struct {
 	Order   int
 	Label   string
 	Blurb   string
+
+	// Area is an optional kb area id. When set and Blurb is empty, the
+	// hub frontend fills the description from that area's summary — so
+	// an auto-derived link stays fresh from the brain (same mechanism
+	// as an explicit hub link's `area:`).
+	Area string
 }
 
 // Resolve fills empty fields of a declared placement from the page

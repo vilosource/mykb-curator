@@ -16,6 +16,7 @@ type Member struct {
 	Order   int
 	Label   string
 	Blurb   string
+	Area    string
 }
 
 // Map maps a hub page title to its members, deterministically ordered.
@@ -40,6 +41,7 @@ func Build(pages []PageNav) Map {
 			Order:   r.Order,
 			Label:   r.Label,
 			Blurb:   r.Blurb,
+			Area:    r.Area,
 		})
 	}
 	for parent := range m {

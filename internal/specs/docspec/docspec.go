@@ -97,6 +97,7 @@ type navYAML struct {
 	Order   int    `yaml:"order"`
 	Label   string `yaml:"label"`
 	Blurb   string `yaml:"blurb"`
+	Area    string `yaml:"area"`
 }
 
 type sectionYAML struct {
@@ -147,6 +148,7 @@ func toPage(p pageYAML, where string) (DocPage, error) {
 			Order:   p.Nav.Order,
 			Label:   p.Nav.Label,
 			Blurb:   p.Nav.Blurb,
+			Area:    p.Nav.Area,
 		},
 	}
 	srcs, err := parseSources(p.Sources, where)

@@ -67,6 +67,7 @@ type navYAML struct {
 	Order   int    `yaml:"order"`
 	Label   string `yaml:"label"`
 	Blurb   string `yaml:"blurb"`
+	Area    string `yaml:"area"`
 }
 
 type hubYAML struct {
@@ -153,6 +154,7 @@ func Parse(id string, content []byte) (specs.Spec, error) {
 			Order:   f.Nav.Order,
 			Label:   f.Nav.Label,
 			Blurb:   f.Nav.Blurb,
+			Area:    f.Nav.Area,
 		},
 		Body: string(body),
 		Hash: hashContent(content),

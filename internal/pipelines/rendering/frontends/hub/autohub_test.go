@@ -69,3 +69,15 @@ func TestExpandAuto_UndeclaredSectionGoesToOther(t *testing.T) {
 		t.Fatalf("undeclared/empty-section members must fall to a trailing bucket; got %+v", got.Hub.Sections)
 	}
 }
+
+// A member's nav.area is carried onto the HubLink so the hub
+// frontend's area→summary fallback fills the blurb (fresh from kb).
+func TestExpandAuto_CarriesAreaForSummaryFallback(t *testing.T) {
+	s := autoSpec("H", specs.HubSection{Title: "Topics"})
+	m := nav.Map{"H": {{Page: "H/Vault", Section: "Topics", Label: "Vault", Area: "vault"}}}
+	got := hub.ExpandAuto(s, m)
+	link := got.Hub.Sections[0].Links[0]
+	if link.Area != "vault" || link.Desc != "" {
+		t.Errorf("want Area=vault + empty Desc (so frontend fills from summary), got %+v", link)
+	}
+}

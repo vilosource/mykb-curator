@@ -62,5 +62,7 @@ func ExpandAuto(spec specs.Spec, m nav.Map) specs.Spec {
 }
 
 func memberLink(m nav.Member) specs.HubLink {
-	return specs.HubLink{Page: m.Page, Label: m.Label, Desc: m.Blurb}
+	// Area is carried so the hub frontend's existing area→summary
+	// fallback fills Desc when Blurb is empty (fresh-from-kb blurbs).
+	return specs.HubLink{Page: m.Page, Label: m.Label, Desc: m.Blurb, Area: m.Area}
 }
