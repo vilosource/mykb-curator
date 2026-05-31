@@ -408,6 +408,13 @@ func ResolveKB(snap kb.Snapshot, s docspec.Source) (*kb.Area, []kb.Entry, bool) 
 	return a, out, true
 }
 
+// wantsDiagram reports whether a contract/intent explicitly calls for
+// a diagram, in which case the section prompt makes the mermaid block
+// mandatory rather than optional.
+func wantsDiagram(intent string) bool {
+	return strings.Contains(strings.ToLower(intent), "diagram")
+}
+
 func composeSectionPrompt(page docspec.DocPage, sec docspec.DocSection, kbDigest string, nonKB []string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Page: %s\nPage intent: %s\n\n", page.Page, page.Intent)
@@ -421,7 +428,15 @@ func composeSectionPrompt(page docspec.DocPage, sec docspec.DocSection, kbDigest
 	sb.WriteString("- If and only if the supplied sources do not support a required contract item, state that explicitly and briefly for that item as `_Not covered by current sources: <item>._` Never omit a required item silently and never invent organisation specifics to fill it.\n")
 	sb.WriteString("- Before finishing, reconcile your text against the contract item by item: EACH item must be either delivered with the supplied specifics OR carry its own `_Not covered by current sources: <item>._` line. Writing fluent but off-contract prose about the topic in general — covering adjacent material the grounding happens to be rich in while a contract item goes unaddressed — is the single most common failure here and is NOT acceptable; a present-in-grounding item must never be left out because other material was easier to write.\n\n")
 	sb.WriteString("Do NOT output the section heading. Do NOT use # or ## headings. ")
-	sb.WriteString("Use ### sparingly only for genuine sub-points. You MAY include one mermaid fenced block if it aids understanding.\n\n")
+	if wantsDiagram(page.Intent) || wantsDiagram(sec.Intent) {
+		// The contract explicitly calls for a diagram, so make it
+		// mandatory — "MAY" leaves the model free to omit it and the
+		// Judge then flags the missing diagram. The mermaid fence is
+		// extracted to a DiagramBlock and rendered by RenderDiagrams.
+		sb.WriteString("Use ### sparingly only for genuine sub-points. The section contract calls for a diagram, so you MUST include exactly one small mermaid fenced block capturing the architecture/flow (grounded in the supplied specifics).\n\n")
+	} else {
+		sb.WriteString("Use ### sparingly only for genuine sub-points. You MAY include one mermaid fenced block if it aids understanding.\n\n")
+	}
 	if strings.TrimSpace(kbDigest) != "" {
 		sb.WriteString("Ground every organisation-specific claim ONLY in the following knowledge base content. Do not invent organisation specifics.\n\n")
 		sb.WriteString(kbDigest)

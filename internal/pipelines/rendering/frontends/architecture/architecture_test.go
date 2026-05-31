@@ -527,3 +527,19 @@ func TestRender_NoFeedbackPromptHasNoPriorDraftBlock(t *testing.T) {
 		t.Errorf("plain Render prompt leaked feedback scaffolding:\n%s", llmC.seen[0].Prompt)
 	}
 }
+
+// A section whose contract asks for a diagram gets a MANDATORY mermaid
+// instruction; a section that doesn't keeps the optional phrasing.
+func TestComposeSectionPrompt_DiagramRequestIsMandatory(t *testing.T) {
+	page := docspec.DocPage{Page: "P", Intent: "overview"}
+	withDiagram := docspec.DocSection{Title: "System Architecture", Intent: "Explain the deployment, including a small architecture diagram."}
+	p := composeSectionPrompt(page, withDiagram, "kb stuff", nil)
+	if !strings.Contains(p, "MUST include") || !strings.Contains(strings.ToLower(p), "mermaid") {
+		t.Errorf("diagram-requesting section must get a mandatory mermaid instruction; got:\n%s", p)
+	}
+	noDiagram := docspec.DocSection{Title: "Routine Ops", Intent: "Health checks and rolling updates."}
+	q := composeSectionPrompt(page, noDiagram, "kb stuff", nil)
+	if strings.Contains(q, "MUST include") {
+		t.Errorf("non-diagram section must keep optional diagram phrasing; got:\n%s", q)
+	}
+}
