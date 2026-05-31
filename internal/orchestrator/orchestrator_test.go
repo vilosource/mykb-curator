@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,12 +14,14 @@ import (
 	"github.com/vilosource/mykb-curator/internal/adapters/specs"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki/memory"
+	"github.com/vilosource/mykb-curator/internal/cache/clustercache"
 	"github.com/vilosource/mykb-curator/internal/cache/ircache"
 	"github.com/vilosource/mykb-curator/internal/cache/manifest"
 	"github.com/vilosource/mykb-curator/internal/cache/runstate"
 	"github.com/vilosource/mykb-curator/internal/llm"
 	"github.com/vilosource/mykb-curator/internal/nav"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/backends/markdown"
+	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/cluster"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/frontends/hub"
 	"github.com/vilosource/mykb-curator/internal/pipelines/rendering/ir"
@@ -728,5 +731,65 @@ func TestRun_OrphanRetire_RedirectsSubpagedToParent(t *testing.T) {
 	human, _ := target.GetPage(context.Background(), "OptiscanGroup/Azure_Infrastructure/HumanOwned")
 	if human == nil || human.Content != "a human wrote this" {
 		t.Errorf("human-edited orphan must be left in place; got %q", human.Content)
+	}
+}
+
+// rendererFunc adapts a func to cluster.Renderer.
+type rendererFunc func(ctx context.Context, page docspec.DocPage, snap kb.Snapshot) (ir.Document, error)
+
+func (f rendererFunc) Render(ctx context.Context, page docspec.DocPage, snap kb.Snapshot) (ir.Document, error) {
+	return f(ctx, page, snap)
+}
+
+// With the cluster cache, a renderer whose output changes every call
+// (simulating LLM nondeterminism) still yields IDENTICAL published
+// output across runs — an unchanged cluster is a cache hit and is never
+// re-synthesised (task #3).
+func TestRun_ClusterCache_DeterministicAcrossRuns(t *testing.T) {
+	cc, err := clustercache.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("clustercache.Open: %v", err)
+	}
+	target := memory.New("User:Bot")
+	var calls int
+	rend := rendererFunc(func(_ context.Context, page docspec.DocPage, _ kb.Snapshot) (ir.Document, error) {
+		calls++
+		return ir.Document{
+			Frontmatter: ir.Frontmatter{Title: page.Page},
+			Sections:    []ir.Section{{Blocks: []ir.Block{ir.ProseBlock{Text: fmt.Sprintf("synthesis-%d", calls)}}}},
+		}, nil
+	})
+	docs := fakeDocSpecs{files: []docspecs.File{{ID: "d.doc.yaml", Spec: docspec.DocSpec{
+		Topic: "T", Parent: docspec.DocPage{Page: "P", Kind: "architecture"},
+	}}}}
+	build := func() *Orchestrator {
+		return New(Deps{
+			Wiki: "acme", KB: fakeKB{commit: "c1"},
+			Specs:        fakeSpecs{},
+			DocSpecs:     docs,
+			Cluster:      cluster.New(rend),
+			WikiTarget:   target,
+			Backend:      markdown.New(),
+			ClusterCache: cc,
+		})
+	}
+
+	if _, err := build().Run(context.Background()); err != nil {
+		t.Fatalf("run 1: %v", err)
+	}
+	p1, _ := target.GetPage(context.Background(), "P")
+	if _, err := build().Run(context.Background()); err != nil {
+		t.Fatalf("run 2: %v", err)
+	}
+	p2, _ := target.GetPage(context.Background(), "P")
+
+	if p1 == nil || p2 == nil || p1.Content != p2.Content {
+		t.Fatalf("cluster cache must make output deterministic across runs; run1=%v run2=%v", p1, p2)
+	}
+	if !strings.Contains(p2.Content, "synthesis-1") {
+		t.Errorf("run 2 must reuse cached synthesis-1, got %q", p2.Content)
+	}
+	if calls != 1 {
+		t.Errorf("renderer should be called once (run 2 is a cache hit); got %d calls", calls)
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/vilosource/mykb-curator/internal/adapters/kb"
 	"github.com/vilosource/mykb-curator/internal/adapters/specs"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki"
+	"github.com/vilosource/mykb-curator/internal/cache/clustercache"
 	"github.com/vilosource/mykb-curator/internal/cache/ircache"
 	"github.com/vilosource/mykb-curator/internal/cache/manifest"
 	"github.com/vilosource/mykb-curator/internal/cache/runstate"
@@ -100,6 +101,13 @@ type Deps struct {
 	// any spec). Nil disables orphan-pruning (docs/navigation-DESIGN.md
 	// §11).
 	Manifest *manifest.Store
+
+	// ClusterCache caches a whole docspec cluster's post-refine IR +
+	// Judge verdict, keyed by cluster.ClusterKey. On a hit (unchanged
+	// spec + kb) the orchestrator reuses it and skips both LLM
+	// synthesis and the Judge — removing run-to-run nondeterminism
+	// (task #3). Nil disables cluster caching.
+	ClusterCache *clustercache.Cache
 
 	// PipelineVersion is included in the IR cache key. Bump it
 	// whenever frontend/pass output behaviour changes so cached IR
@@ -248,6 +256,20 @@ func (o *Orchestrator) runDocSpecs(ctx context.Context, snap kb.Snapshot, passPi
 		return
 	}
 	for _, f := range files {
+		// Cluster cache: an unchanged cluster (same spec + kb) reuses its
+		// cached post-refine IR + Judge verdict, skipping both synthesis
+		// and the Judge — the source of run-to-run nondeterminism (#3).
+		var key string
+		if o.deps.ClusterCache != nil {
+			key = cluster.ClusterKey(f.Spec, snap, o.pipelineVersion())
+			if cachedPages, ok, err := o.deps.ClusterCache.Get(key); err == nil && ok {
+				for _, cp := range cachedPages {
+					rb.AddSpecResult(o.publishClusterPage(ctx, f.ID+"::"+cp.Page, cp.Page, cp.Doc, cp.Iters, cp.Verdict, snap))
+				}
+				continue
+			}
+		}
+
 		pages, err := o.deps.Cluster.Render(ctx, f.Spec, snap)
 		if err != nil {
 			rb.AddSpecResult(reporter.SpecResult{
@@ -258,8 +280,21 @@ func (o *Orchestrator) runDocSpecs(ctx context.Context, snap kb.Snapshot, passPi
 			continue
 		}
 		byTitle := docPagesByTitle(f.Spec)
+		results := make([]clustercache.PageResult, 0, len(pages))
+		allOK := true
 		for _, p := range pages {
-			rb.AddSpecResult(o.processClusterPage(ctx, f.ID, p, byTitle[p.Page], snap, passPipeline, rb))
+			res, cp := o.processClusterPage(ctx, f.ID, p, byTitle[p.Page], snap, passPipeline, rb)
+			rb.AddSpecResult(res)
+			if res.Status == reporter.StatusFailed {
+				allOK = false
+			} else {
+				results = append(results, cp)
+			}
+		}
+		// Only cache a fully-successful cluster — a transient LLM failure
+		// on any page must not poison the cache (it retries next run).
+		if o.deps.ClusterCache != nil && key != "" && allOK {
+			_ = o.deps.ClusterCache.Set(key, results)
 		}
 	}
 }
@@ -268,7 +303,7 @@ func (o *Orchestrator) runDocSpecs(ctx context.Context, snap kb.Snapshot, passPi
 // reviews it with the Judge (report-only), then reconciles + pushes
 // it under a synthetic per-page spec ID so run-state + human-edit
 // detection work exactly as for legacy specs.
-func (o *Orchestrator) processClusterPage(ctx context.Context, dsID string, p cluster.RenderedPage, page docspec.DocPage, snap kb.Snapshot, passPipeline *passes.Pipeline, rb *reporter.Builder) reporter.SpecResult {
+func (o *Orchestrator) processClusterPage(ctx context.Context, dsID string, p cluster.RenderedPage, page docspec.DocPage, snap kb.Snapshot, passPipeline *passes.Pipeline, rb *reporter.Builder) (reporter.SpecResult, clustercache.PageResult) {
 	id := dsID + "::" + p.Page
 	doc := p.Doc
 
@@ -292,7 +327,7 @@ func (o *Orchestrator) processClusterPage(ctx context.Context, dsID string, p cl
 		}
 		res, rerr := o.deps.Refiner.Run(ctx, page, doc, snap, clusterGrounding(page, snap), rp)
 		if rerr != nil {
-			return reporter.SpecResult{ID: id, Status: reporter.StatusFailed, Reason: rerr.Error()}
+			return reporter.SpecResult{ID: id, Status: reporter.StatusFailed, Reason: rerr.Error()}, clustercache.PageResult{}
 		}
 		doc = res.Doc
 		judgeIters = res.Iterations
@@ -307,7 +342,7 @@ func (o *Orchestrator) processClusterPage(ctx context.Context, dsID string, p cl
 		if passPipeline != nil {
 			doc, err = passPipeline.Apply(ctx, doc)
 			if err != nil {
-				return reporter.SpecResult{ID: id, Status: reporter.StatusFailed, Reason: err.Error()}
+				return reporter.SpecResult{ID: id, Status: reporter.StatusFailed, Reason: err.Error()}, clustercache.PageResult{}
 			}
 		}
 		// Judge BEFORE push — report-only. A failing or inconclusive
@@ -322,6 +357,16 @@ func (o *Orchestrator) processClusterPage(ctx context.Context, dsID string, p cl
 		}
 	}
 
+	cached := clustercache.PageResult{Page: p.Page, Kind: p.Kind, Doc: doc, Verdict: judgeVerdict, Iters: judgeIters}
+	return o.publishClusterPage(ctx, id, p.Page, doc, judgeIters, judgeVerdict, snap), cached
+}
+
+// publishClusterPage is the deterministic tail of cluster-page
+// processing: render the (already-judged) IR, reconcile, push, report.
+// It is called both fresh (after synthesis + Judge) and on a cluster
+// cache HIT (with the cached IR + verdict) — so a hit reproduces the
+// same published content and verdict without re-running the LLM.
+func (o *Orchestrator) publishClusterPage(ctx context.Context, id, pageTitle string, doc ir.Document, judgeIters int, judgeVerdict string, snap kb.Snapshot) reporter.SpecResult {
 	if o.deps.Backend == nil || o.deps.WikiTarget == nil {
 		return reporter.SpecResult{ID: id, Status: reporter.StatusRendered, BlocksRegenerated: countBlocks(doc), JudgeIterations: judgeIters, JudgeVerdict: judgeVerdict}
 	}
@@ -330,7 +375,7 @@ func (o *Orchestrator) processClusterPage(ctx context.Context, dsID string, p cl
 		return reporter.SpecResult{ID: id, Status: reporter.StatusFailed, Reason: fmt.Errorf("backend %s: %w", o.deps.Backend.Name(), err).Error()}
 	}
 
-	synthetic := specs.Spec{ID: id, Page: p.Page, Wiki: o.deps.Wiki}
+	synthetic := specs.Spec{ID: id, Page: pageTitle, Wiki: o.deps.Wiki}
 	pr, err := o.reconcileAndPush(ctx, synthetic, rendered, snap.Commit)
 	if err != nil {
 		return reporter.SpecResult{ID: id, Status: reporter.StatusFailed, Reason: err.Error()}

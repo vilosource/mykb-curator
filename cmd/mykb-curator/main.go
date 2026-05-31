@@ -38,6 +38,7 @@ import (
 	wikipkg "github.com/vilosource/mykb-curator/internal/adapters/wiki"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki/mediawiki"
 	"github.com/vilosource/mykb-curator/internal/adapters/wiki/memory"
+	"github.com/vilosource/mykb-curator/internal/cache/clustercache"
 	"github.com/vilosource/mykb-curator/internal/cache/ircache"
 	"github.com/vilosource/mykb-curator/internal/cache/manifest"
 	"github.com/vilosource/mykb-curator/internal/cache/runstate"
@@ -281,6 +282,11 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 		return err
 	}
 
+	clusterCache, err := composeClusterCache(cfg)
+	if err != nil {
+		return err
+	}
+
 	orchLLM := llm.Client(stubLLM{})
 	if llmClient != nil {
 		orchLLM = llmClient
@@ -300,6 +306,7 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 		OnRendered:    onRendered,
 		RunState:      cache,
 		Manifest:      orphanManifest(cfg),
+		ClusterCache:  clusterCache,
 		IRCache:       irCache,
 		Maintenance:   maintPipeline,
 		OnMaintenance: onMaint,
@@ -747,6 +754,18 @@ func composeIRCache(cfg *config.Config) (*ircache.Cache, error) {
 		base = filepath.Join(os.Getenv("HOME"), ".cache", "mykb-curator", cfg.Wiki)
 	}
 	return ircache.Open(filepath.Join(base, "ir"))
+}
+
+// composeClusterCache opens the per-wiki cluster cache (post-refine IR
+// + Judge verdict per cluster). Like the IR cache it invalidates on
+// spec/kb changes via ClusterKey; rendering-CODE changes need a
+// PipelineVersion bump (or a cache clear) to take effect.
+func composeClusterCache(cfg *config.Config) (*clustercache.Cache, error) {
+	base := cfg.CacheDir
+	if base == "" {
+		base = filepath.Join(os.Getenv("HOME"), ".cache", "mykb-curator", cfg.Wiki)
+	}
+	return clustercache.Open(filepath.Join(base, "cluster"))
 }
 
 // composeRunStateCache opens the per-wiki bbolt cache. Returns a
