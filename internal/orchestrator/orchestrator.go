@@ -262,7 +262,10 @@ func (o *Orchestrator) runDocSpecs(ctx context.Context, snap kb.Snapshot, passPi
 		var key string
 		if o.deps.ClusterCache != nil {
 			key = cluster.ClusterKey(f.Spec, snap, o.pipelineVersion())
-			if cachedPages, ok, err := o.deps.ClusterCache.Get(key); err == nil && ok {
+			cachedPages, ok, err := o.deps.ClusterCache.Get(key)
+			if err != nil {
+				rb.AddWarning(fmt.Sprintf("cluster-cache get %s: %v", f.ID, err))
+			} else if ok {
 				for _, cp := range cachedPages {
 					rb.AddSpecResult(o.publishClusterPage(ctx, f.ID+"::"+cp.Page, cp.Page, cp.Doc, cp.Iters, cp.Verdict, snap))
 				}
@@ -293,8 +296,12 @@ func (o *Orchestrator) runDocSpecs(ctx context.Context, snap kb.Snapshot, passPi
 		}
 		// Only cache a fully-successful cluster — a transient LLM failure
 		// on any page must not poison the cache (it retries next run).
-		if o.deps.ClusterCache != nil && key != "" && allOK {
-			_ = o.deps.ClusterCache.Set(key, results)
+		if o.deps.ClusterCache != nil && key != "" {
+			if !allOK {
+				rb.AddWarning(fmt.Sprintf("cluster-cache: not caching %s (a page failed)", f.ID))
+			} else if err := o.deps.ClusterCache.Set(key, results); err != nil {
+				rb.AddWarning(fmt.Sprintf("cluster-cache set %s: %v", f.ID, err))
+			}
 		}
 	}
 }

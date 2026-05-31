@@ -37,3 +37,29 @@ func TestGet_MissIsCleanFalse(t *testing.T) {
 		t.Errorf("miss should be (false,nil), got ok=%v err=%v", ok, err)
 	}
 }
+
+// Every ir.Block type must be gob-registered, or Set fails at runtime
+// (it did, silently, for CategoryBlock until this was caught live). A
+// populated value of each type exercises the interface encoding.
+func TestSet_AllBlockTypesEncode(t *testing.T) {
+	doc := ir.Document{Sections: []ir.Section{{Heading: "S", Blocks: []ir.Block{
+		ir.ProseBlock{Text: "p"},
+		ir.MachineBlock{Body: "m"},
+		ir.KBRefBlock{Area: "a", ID: "x"},
+		ir.TableBlock{},
+		ir.IndexBlock{Entries: []ir.IndexEntry{{Page: "P", Label: "L"}}},
+		ir.CategoryBlock{Names: []string{"Azure Infrastructure"}},
+		ir.DiagramBlock{Lang: "mermaid"},
+		ir.Callout{},
+		ir.EscapeHatch{},
+		ir.MarkerBlock{},
+	}}}}
+	c, _ := Open(t.TempDir())
+	if err := c.Set("k", []PageResult{{Page: "P", Doc: doc, Verdict: "v", Iters: 2}}); err != nil {
+		t.Fatalf("Set must encode every block type (incl CategoryBlock): %v", err)
+	}
+	got, ok, err := c.Get("k")
+	if err != nil || !ok || len(got) != 1 || len(got[0].Doc.Sections[0].Blocks) != 10 {
+		t.Fatalf("round-trip lost blocks: ok=%v err=%v got=%+v", ok, err, got)
+	}
+}
