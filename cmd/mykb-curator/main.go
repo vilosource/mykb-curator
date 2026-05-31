@@ -310,6 +310,9 @@ func runFromConfig(ctx context.Context, cfg *config.Config, outDir, reportDir st
 		IRCache:       irCache,
 		Maintenance:   maintPipeline,
 		OnMaintenance: onMaint,
+		// Auto-stamped from the running binary so rendering-code changes
+		// self-invalidate the IR + cluster caches (see buildID).
+		PipelineVersion: buildID(),
 	}
 	// Only assign the docspec interface fields when concretely wired:
 	// assigning a typed nil pointer to an interface field yields a
@@ -758,8 +761,9 @@ func composeIRCache(cfg *config.Config) (*ircache.Cache, error) {
 
 // composeClusterCache opens the per-wiki cluster cache (post-refine IR
 // + Judge verdict per cluster). Like the IR cache it invalidates on
-// spec/kb changes via ClusterKey; rendering-CODE changes need a
-// PipelineVersion bump (or a cache clear) to take effect.
+// spec/kb changes via ClusterKey; rendering-CODE changes are picked up
+// automatically because PipelineVersion is stamped from the binary
+// (see buildID) — no manual cache clear or version bump needed.
 func composeClusterCache(cfg *config.Config) (*clustercache.Cache, error) {
 	base := cfg.CacheDir
 	if base == "" {

@@ -109,9 +109,11 @@ type Deps struct {
 	// (task #3). Nil disables cluster caching.
 	ClusterCache *clustercache.Cache
 
-	// PipelineVersion is included in the IR cache key. Bump it
-	// whenever frontend/pass output behaviour changes so cached IR
-	// from older code is invalidated. Defaults to "v1" if unset.
+	// PipelineVersion is mixed into both the IR and cluster cache keys
+	// so output from older rendering code is invalidated when the
+	// pipeline changes. The composition root stamps it from the running
+	// binary (cmd/mykb-curator buildID) so code changes self-invalidate
+	// the caches automatically. Defaults to "v1" if unset (e.g. tests).
 	PipelineVersion string
 
 	// Maintenance is the kb-maintenance pipeline (staleness, link-rot,
